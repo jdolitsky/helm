@@ -105,6 +105,7 @@ func newRootCmd(args []string) *cobra.Command {
 		newInspectCmd(out),
 		newLintCmd(out),
 		newPackageCmd(out),
+		newPushCmd(out),
 		newRepoCmd(out),
 		newSearchCmd(out),
 		newServeCmd(out),

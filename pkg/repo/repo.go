@@ -124,6 +124,17 @@ func (r *RepoFile) Has(name string) bool {
 	return false
 }
 
+// Get returns a repository by name, and whether or not it exists.
+func (r *RepoFile) Get(name string) (*Entry, bool) {
+	for _, rf := range r.Repositories {
+		if rf.Name == name {
+			return rf, true
+		}
+	}
+	return nil, false
+}
+
+
 // Remove removes the entry from the list of repositories.
 func (r *RepoFile) Remove(name string) bool {
 	cp := []*Entry{}

@@ -41,6 +41,7 @@ type Entry struct {
 	CertFile string `json:"certFile"`
 	KeyFile  string `json:"keyFile"`
 	CAFile   string `json:"caFile"`
+	Provider string `json:"provider"`
 }
 
 // ChartRepository represents a chart repository
