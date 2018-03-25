@@ -17,36 +17,20 @@ limitations under the License.
 package chartmuseum // import "k8s.io/helm/pkg/repo/providers/chartmuseum"
 
 import (
-	"fmt"
-	"path/filepath"
-
-	"k8s.io/helm/pkg/chartutil"
 	"k8s.io/helm/pkg/repo/config"
 )
 
 type (
-	Provider struct {
+	ChartMuseum struct {
 		Config *config.Entry
+	}
+
+	errorResponse struct {
+		Error string `json:"error"`
 	}
 )
 
-func (p *Provider) PushChart(absPath string, repoDestPath string) error {
-	chart, err := chartutil.LoadFile(absPath)
-	if err != nil {
-		return err
-	}
-
-	var extraMsg string
-	if repoDestPath != "" {
-		extraMsg = fmt.Sprintf(" at path %s", repoDestPath)
-	}
-	meta := chart.GetMetadata()
-	fmt.Println(fmt.Sprintf("Pushing %s version %s to %s%s... ",
-		meta.Name, meta.Version, p.Config.Name, extraMsg))
-
-	endpoint := filepath.Join(p.Config.URL, "api", repoDestPath, "charts")
-	fmt.Println(endpoint)
-
-	fmt.Println("Done.")
+func (cm *ChartMuseum) Init(config *config.Entry) error {
+	cm.Config = config
 	return nil
 }

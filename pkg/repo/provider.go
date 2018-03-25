@@ -25,35 +25,34 @@ import (
 )
 
 type (
-	// Provider is a generic interface for repo providers
+	// Provider supplies additional repo functionality:
+	// - push/upload of charts via PushChart method (helm push)
 	Provider interface {
-		PushChart(path string, repoDestPath string) error
+		Init(*config.Entry) error
+		Push(chartAbsPath string, namespace string) error
 	}
 )
 
+var (
+	providerImplMap = map[string]Provider{
+		"chartmuseum": Provider(new(chartmuseum.ChartMuseum)),
+	}
+)
+
+// GetProvider returns appropriate provider based on repo entry config
 func (cfg *Entry) GetProvider() (Provider, error) {
 	var provider Provider
 	var err error
+	var exists bool
 
-	switch cfg.Provider {
-	case "chartmuseum":
-		provider = &chartmuseum.Provider{
-			Config: &config.Entry{
-				Name:     cfg.Name,
-				Cache:    cfg.Cache,
-				URL:      cfg.URL,
-				Username: cfg.Username,
-				Password: cfg.Password,
-				CertFile: cfg.CertFile,
-				KeyFile:  cfg.KeyFile,
-				CAFile:   cfg.CAFile,
-				Provider: cfg.Provider,
-			},
-		}
-	case "":
-		err = errors.New("repo provider not set")
-	default:
-		err = errors.New(fmt.Sprintf("repo provider \"%s\" not  supported", cfg.Provider))
+	provider, exists = providerImplMap[cfg.Provider]
+
+	if exists {
+		err = provider.Init(&config.Entry{Name: cfg.Name, Cache: cfg.Cache, URL: cfg.URL, Username: cfg.Username, Password: cfg.Password, CertFile: cfg.CertFile, KeyFile: cfg.KeyFile, CAFile: cfg.CAFile, Provider: cfg.Provider})
+	} else if cfg.Provider == "" {
+		err = errors.New("this method requires a repo provider, re-add repo with --provider flag")
+	} else {
+		err = errors.New(fmt.Sprintf("this method not supported by repo provider \"%s\"", cfg.Provider))
 	}
 
 	return provider, err

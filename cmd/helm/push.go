@@ -32,19 +32,22 @@ Push a package to a remote repository.
 `
 
 type pushCmd struct {
-	path         string
-	repoName     string
-	repoDestPath string
+	path      string
+	repoName  string
+	namespace string
 
 	out  io.Writer
 	home helmpath.Home
 }
 
 func newPushCmd(out io.Writer) *cobra.Command {
-	push := &pushCmd{out: out}
+	push := &pushCmd{
+		out:  out,
+		home: settings.Home,
+	}
 
 	cmd := &cobra.Command{
-		Use:   "push [flags] [CHART_PATH] [REPO_NAME] [REPO_DEST_PATH] [...]",
+		Use:   "push [flags] [CHART_PATH] [REPO_NAME] [NAMESPACE] [...]",
 		Short: "push a package to a remote repository",
 		Long:  pushDesc,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -54,10 +57,9 @@ func newPushCmd(out io.Writer) *cobra.Command {
 				if err := checkArgsLength(numArgs-1, requiredArgs...); err != nil {
 					return err
 				}
-				push.repoDestPath = args[2]
+				push.namespace = args[2]
 			}
 
-			push.home = settings.Home
 			push.path = args[0]
 			push.repoName = args[1]
 
@@ -70,7 +72,7 @@ func newPushCmd(out io.Writer) *cobra.Command {
 }
 
 func (p *pushCmd) run() error {
-	path, err := filepath.Abs(p.path)
+	chartAbsPath, err := filepath.Abs(p.path)
 	if err != nil {
 		return err
 	}
@@ -87,5 +89,5 @@ func (p *pushCmd) run() error {
 		return fmt.Errorf("no repo named %q found", repoName)
 	}
 
-	return repository.PushChart(path, p.repoDestPath)
+	return repository.Push(chartAbsPath, p.namespace)
 }
