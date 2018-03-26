@@ -16,11 +16,11 @@ limitations under the License.
 
 package repo // import "k8s.io/helm/pkg/repo"
 
-// PushChart pushes a chart to a repository, if a provider is set
-func (cfg *Entry) Push(chartAbsPath string, namespace string) error {
+// Push pushes a package to a repository, if a provider is set.
+func (cfg *Entry) Push(packageAbsPath string, namespace string) error {
 	provider, err := cfg.GetProvider()
 	if err != nil {
 		return err
 	}
-	return provider.Push(chartAbsPath, namespace)
+	return provider.Push(packageAbsPath, namespace)
 }

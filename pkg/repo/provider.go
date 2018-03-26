@@ -26,11 +26,10 @@ import (
 )
 
 type (
-	// Provider supplies additional repo functionality:
-	// - push/upload of charts via PushChart method (helm push)
+	// Provider supplies additional repo functionality.
 	Provider interface {
 		Init(*config.Entry) error
-		Push(chartAbsPath string, namespace string) error
+		Push(packageAbsPath string, namespace string) error
 	}
 )
 
@@ -40,7 +39,7 @@ var (
 	}
 )
 
-// GetProvider returns appropriate provider based on repo entry config
+// GetProvider returns appropriate provider based on repo entry config.
 func (cfg *Entry) GetProvider() (Provider, error) {
 	var provider Provider
 	var err error

@@ -34,8 +34,9 @@ import (
 	"k8s.io/helm/pkg/version"
 )
 
-func (cm *ChartMuseum) Push(chartAbsPath string, namespace string) error {
-	chart, err := chartutil.LoadFile(chartAbsPath)
+// Push uploads a chart package to a ChartMuseum web server.
+func (cm *ChartMuseum) Push(packageAbsPath string, namespace string) error {
+	chart, err := chartutil.LoadFile(packageAbsPath)
 	if err != nil {
 		return err
 	}
@@ -47,10 +48,10 @@ func (cm *ChartMuseum) Push(chartAbsPath string, namespace string) error {
 	}
 	fmt.Println(msg + "...")
 
-	return uploadChart(chartAbsPath, cm.Config.URL, namespace, cm.Config.Username, cm.Config.Password)
+	return uploadPackage(packageAbsPath, cm.Config.URL, namespace, cm.Config.Username, cm.Config.Password)
 }
 
-func uploadChart(chartAbsPath string, endpoint string, namespace string, username string, password string) error {
+func uploadPackage(packageAbsPath string, endpoint string, namespace string, username string, password string) error {
 	client := &http.Client{}
 
 	u, err := url.Parse(endpoint)
@@ -60,7 +61,7 @@ func uploadChart(chartAbsPath string, endpoint string, namespace string, usernam
 		return err
 	}
 
-	err = setUploadChartRequestBody(req, chartAbsPath)
+	err = setUploadPackageRequestBody(req, packageAbsPath)
 	if err != nil {
 		return err
 	}
@@ -95,16 +96,16 @@ func uploadChart(chartAbsPath string, endpoint string, namespace string, usernam
 	return nil
 }
 
-func setUploadChartRequestBody(req *http.Request, chartAbsPath string) error {
+func setUploadPackageRequestBody(req *http.Request, packageAbsPath string) error {
 	var body bytes.Buffer
 	w := multipart.NewWriter(&body)
 	defer w.Close()
-	fw, err := w.CreateFormFile("chart", chartAbsPath)
+	fw, err := w.CreateFormFile("chart", packageAbsPath)
 	if err != nil {
 		return err
 	}
 	w.FormDataContentType()
-	fd, err := os.Open(chartAbsPath)
+	fd, err := os.Open(packageAbsPath)
 	if err != nil {
 		return err
 	}

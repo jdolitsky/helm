@@ -21,6 +21,7 @@ import (
 )
 
 type (
+	// ChartMuseum is a repo provider for the ChartMuseum web server.
 	ChartMuseum struct {
 		Config *config.Entry
 	}
@@ -30,6 +31,7 @@ type (
 	}
 )
 
+// Init configures a ChartMuseum instance from repo config.
 func (cm *ChartMuseum) Init(config *config.Entry) error {
 	cm.Config = config
 	return nil

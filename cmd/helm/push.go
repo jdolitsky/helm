@@ -32,9 +32,9 @@ Push a package to a remote repository.
 `
 
 type pushCmd struct {
-	path      string
-	repoName  string
-	namespace string
+	packagePath string
+	repoName    string
+	namespace   string
 
 	out  io.Writer
 	home helmpath.Home
@@ -47,7 +47,7 @@ func newPushCmd(out io.Writer) *cobra.Command {
 	}
 
 	cmd := &cobra.Command{
-		Use:   "push [flags] [CHART_PATH] [REPO_NAME] [NAMESPACE] [...]",
+		Use:   "push [flags] [PACKAGE_PATH] [REPO_NAME] [NAMESPACE] [...]",
 		Short: "push a package to a remote repository",
 		Long:  pushDesc,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -60,7 +60,7 @@ func newPushCmd(out io.Writer) *cobra.Command {
 				push.namespace = args[2]
 			}
 
-			push.path = args[0]
+			push.packagePath = args[0]
 			push.repoName = args[1]
 
 			err := push.run()
@@ -72,7 +72,7 @@ func newPushCmd(out io.Writer) *cobra.Command {
 }
 
 func (p *pushCmd) run() error {
-	chartAbsPath, err := filepath.Abs(p.path)
+	packageAbsPath, err := filepath.Abs(p.packagePath)
 	if err != nil {
 		return err
 	}
@@ -89,5 +89,5 @@ func (p *pushCmd) run() error {
 		return fmt.Errorf("no repo named %q found", repoName)
 	}
 
-	return repository.Push(chartAbsPath, p.namespace)
+	return repository.Push(packageAbsPath, p.namespace)
 }
