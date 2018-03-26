@@ -55,7 +55,7 @@ func uploadPackage(packageAbsPath string, endpoint string, namespace string, use
 	client := &http.Client{}
 
 	u, err := url.Parse(endpoint)
-	u.Path = path.Join(u.Path, "api", namespace, "charts")
+	u.Path = path.Join("api", namespace, "charts")
 	req, err := http.NewRequest("POST", u.String(), nil)
 	if err != nil {
 		return err
