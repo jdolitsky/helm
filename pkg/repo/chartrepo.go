@@ -27,33 +27,21 @@ import (
 	"github.com/ghodss/yaml"
 
 	"k8s.io/helm/pkg/chartutil"
+	"k8s.io/helm/pkg/repo/repoconfig"
 	"k8s.io/helm/pkg/getter"
 	"k8s.io/helm/pkg/provenance"
 )
 
-// Entry represents a collection of parameters for chart repository
-type Entry struct {
-	Name     string `json:"name"`
-	Cache    string `json:"cache"`
-	URL      string `json:"url"`
-	Provider string `json:"provider"`
-	Username string `json:"username"`
-	Password string `json:"password"`
-	CertFile string `json:"certFile"`
-	KeyFile  string `json:"keyFile"`
-	CAFile   string `json:"caFile"`
-}
-
 // ChartRepository represents a chart repository
 type ChartRepository struct {
-	Config     *Entry
+	Config     *repoconfig.Entry
 	ChartPaths []string
 	IndexFile  *IndexFile
 	Client     getter.Getter
 }
 
 // NewChartRepository constructs ChartRepository
-func NewChartRepository(cfg *Entry, getters getter.Providers) (*ChartRepository, error) {
+func NewChartRepository(cfg *repoconfig.Entry, getters getter.Providers) (*ChartRepository, error) {
 	u, err := url.Parse(cfg.URL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid chart URL format: %s", cfg.URL)
@@ -209,7 +197,7 @@ func FindChartInAuthRepoURL(repoURL, username, password, chartName, chartVersion
 	}
 	defer os.Remove(tempIndexFile.Name())
 
-	c := Entry{
+	c := repoconfig.Entry{
 		URL:      repoURL,
 		Username: username,
 		Password: password,

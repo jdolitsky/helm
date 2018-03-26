@@ -35,6 +35,7 @@ import (
 	"k8s.io/helm/pkg/helm/helmpath"
 	"k8s.io/helm/pkg/proto/hapi/chart"
 	"k8s.io/helm/pkg/repo"
+	"k8s.io/helm/pkg/repo/repoconfig"
 	"k8s.io/helm/pkg/resolver"
 	"k8s.io/helm/pkg/urlutil"
 )
@@ -446,7 +447,7 @@ func (m *Manager) UpdateRepositories() error {
 	return nil
 }
 
-func (m *Manager) parallelRepoUpdate(repos []*repo.Entry) error {
+func (m *Manager) parallelRepoUpdate(repos []*repoconfig.Entry) error {
 	out := m.Out
 	fmt.Fprintln(out, "Hang tight while we grab the latest from your chart repositories...")
 	var wg sync.WaitGroup

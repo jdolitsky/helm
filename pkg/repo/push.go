@@ -16,11 +16,16 @@ limitations under the License.
 
 package repo // import "k8s.io/helm/pkg/repo"
 
+import (
+	"k8s.io/helm/pkg/repo/repoconfig"
+	"k8s.io/helm/pkg/repo/provider"
+)
+
 // Push pushes a package to a repository, if a provider is set.
-func (cfg *Entry) Push(packageAbsPath string, namespace string) error {
-	provider, err := cfg.GetProvider()
+func Push(cfg *repoconfig.Entry, packageAbsPath string, namespace string) error {
+	p, err := provider.Load(cfg)
 	if err != nil {
 		return err
 	}
-	return provider.Push(packageAbsPath, namespace)
+	return p.Push(packageAbsPath, namespace)
 }

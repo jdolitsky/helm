@@ -23,6 +23,8 @@ import (
 	"os"
 	"time"
 
+	"k8s.io/helm/pkg/repo/repoconfig"
+
 	"github.com/ghodss/yaml"
 )
 
@@ -32,9 +34,9 @@ var ErrRepoOutOfDate = errors.New("repository file is out of date")
 
 // RepoFile represents the repositories.yaml file in $HELM_HOME
 type RepoFile struct {
-	APIVersion   string    `json:"apiVersion"`
-	Generated    time.Time `json:"generated"`
-	Repositories []*Entry  `json:"repositories"`
+	APIVersion   string              `json:"apiVersion"`
+	Generated    time.Time           `json:"generated"`
+	Repositories []*repoconfig.Entry `json:"repositories"`
 }
 
 // NewRepoFile generates an empty repositories file.
@@ -44,7 +46,7 @@ func NewRepoFile() *RepoFile {
 	return &RepoFile{
 		APIVersion:   APIVersionV1,
 		Generated:    time.Now(),
-		Repositories: []*Entry{},
+		Repositories: []*repoconfig.Entry{},
 	}
 }
 
@@ -79,7 +81,7 @@ func LoadRepositoriesFile(path string) (*RepoFile, error) {
 		}
 		r := NewRepoFile()
 		for k, v := range m {
-			r.Add(&Entry{
+			r.Add(&repoconfig.Entry{
 				Name:  k,
 				URL:   v,
 				Cache: fmt.Sprintf("%s-index.yaml", k),
@@ -92,13 +94,13 @@ func LoadRepositoriesFile(path string) (*RepoFile, error) {
 }
 
 // Add adds one or more repo entries to a repo file.
-func (r *RepoFile) Add(re ...*Entry) {
+func (r *RepoFile) Add(re ...*repoconfig.Entry) {
 	r.Repositories = append(r.Repositories, re...)
 }
 
 // Update attempts to replace one or more repo entries in a repo file. If an
 // entry with the same name doesn't exist in the repo file it will add it.
-func (r *RepoFile) Update(re ...*Entry) {
+func (r *RepoFile) Update(re ...*repoconfig.Entry) {
 	for _, target := range re {
 		found := false
 		for j, repo := range r.Repositories {
@@ -125,7 +127,7 @@ func (r *RepoFile) Has(name string) bool {
 }
 
 // Get returns a repository by name, and whether or not it exists.
-func (r *RepoFile) Get(name string) (*Entry, bool) {
+func (r *RepoFile) Get(name string) (*repoconfig.Entry, bool) {
 	for _, rf := range r.Repositories {
 		if rf.Name == name {
 			return rf, true
@@ -134,10 +136,9 @@ func (r *RepoFile) Get(name string) (*Entry, bool) {
 	return nil, false
 }
 
-
 // Remove removes the entry from the list of repositories.
 func (r *RepoFile) Remove(name string) bool {
-	cp := []*Entry{}
+	cp := []*repoconfig.Entry{}
 	found := false
 	for _, rf := range r.Repositories {
 		if rf.Name == name {

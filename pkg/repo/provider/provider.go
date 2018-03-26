@@ -14,21 +14,21 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package repo // import "k8s.io/helm/pkg/repo"
+package provider // import "k8s.io/helm/pkg/repo/provider"
 
 import (
 	"errors"
 	"fmt"
 	"strings"
 
-	"k8s.io/helm/pkg/repo/config"
-	"k8s.io/helm/pkg/repo/providers/chartmuseum"
+	"k8s.io/helm/pkg/repo/repoconfig"
+	"k8s.io/helm/pkg/repo/provider/chartmuseum"
 )
 
 type (
 	// Provider supplies additional repo functionality.
 	Provider interface {
-		Init(*config.Entry) error
+		Init(*repoconfig.Entry) error
 		Push(packageAbsPath string, namespace string) error
 	}
 )
@@ -39,21 +39,21 @@ var (
 	}
 )
 
-// GetProvider returns appropriate provider based on repo entry config.
-func (cfg *Entry) GetProvider() (Provider, error) {
-	var provider Provider
+// Load returns appropriate provider based on repo entry config.
+func Load(cfg *repoconfig.Entry) (Provider, error) {
+	var p Provider
 	var err error
 	var exists bool
 
-	provider, exists = providerImplMap[strings.ToLower(cfg.Provider)]
+	p, exists = providerImplMap[strings.ToLower(cfg.Provider)]
 
 	if exists {
-		err = provider.Init(&config.Entry{Name: cfg.Name, Cache: cfg.Cache, URL: cfg.URL, Username: cfg.Username, Password: cfg.Password, CertFile: cfg.CertFile, KeyFile: cfg.KeyFile, CAFile: cfg.CAFile, Provider: cfg.Provider})
+		err = p.Init(cfg)
 	} else if cfg.Provider == "" {
 		err = errors.New("this method requires a repo provider, re-add repo with --provider flag")
 	} else {
 		err = errors.New(fmt.Sprintf("this method not supported by repo provider \"%s\"", cfg.Provider))
 	}
 
-	return provider, err
+	return p, err
 }

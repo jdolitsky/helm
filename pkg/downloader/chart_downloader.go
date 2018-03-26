@@ -29,6 +29,7 @@ import (
 	"k8s.io/helm/pkg/helm/helmpath"
 	"k8s.io/helm/pkg/provenance"
 	"k8s.io/helm/pkg/repo"
+	"k8s.io/helm/pkg/repo/repoconfig"
 	"k8s.io/helm/pkg/urlutil"
 )
 
@@ -306,7 +307,7 @@ func isTar(filename string) bool {
 	return strings.ToLower(filepath.Ext(filename)) == ".tgz"
 }
 
-func pickChartRepositoryConfigByName(name string, cfgs []*repo.Entry) (*repo.Entry, error) {
+func pickChartRepositoryConfigByName(name string, cfgs []*repoconfig.Entry) (*repoconfig.Entry, error) {
 	for _, rc := range cfgs {
 		if rc.Name == name {
 			if rc.URL == "" {
@@ -336,7 +337,7 @@ func pickChartRepositoryConfigByName(name string, cfgs []*repo.Entry) (*repo.Ent
 // The same URL can technically exist in two or more repositories. This algorithm
 // will return the first one it finds. Order is determined by the order of repositories
 // in the repositories.yaml file.
-func (c *ChartDownloader) scanReposForURL(u string, rf *repo.RepoFile) (*repo.Entry, error) {
+func (c *ChartDownloader) scanReposForURL(u string, rf *repo.RepoFile) (*repoconfig.Entry, error) {
 	// FIXME: This is far from optimal. Larger installations and index files will
 	// incur a performance hit for this type of scanning.
 	for _, rc := range rf.Repositories {

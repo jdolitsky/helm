@@ -36,6 +36,7 @@ import (
 	"k8s.io/helm/pkg/helm/helmpath"
 	"k8s.io/helm/pkg/helm/portforwarder"
 	"k8s.io/helm/pkg/repo"
+	"k8s.io/helm/pkg/repo/repoconfig"
 )
 
 const initDesc = `
@@ -401,9 +402,9 @@ func ensureDefaultRepos(home helmpath.Home, out io.Writer, skipRefresh bool) err
 	return nil
 }
 
-func initStableRepo(cacheFile string, out io.Writer, skipRefresh bool, home helmpath.Home) (*repo.Entry, error) {
+func initStableRepo(cacheFile string, out io.Writer, skipRefresh bool, home helmpath.Home) (*repoconfig.Entry, error) {
 	fmt.Fprintf(out, "Adding %s repo with URL: %s \n", stableRepository, stableRepositoryURL)
-	c := repo.Entry{
+	c := repoconfig.Entry{
 		Name:  stableRepository,
 		URL:   stableRepositoryURL,
 		Cache: cacheFile,
@@ -426,7 +427,7 @@ func initStableRepo(cacheFile string, out io.Writer, skipRefresh bool, home helm
 	return &c, nil
 }
 
-func initLocalRepo(indexFile, cacheFile string, out io.Writer, home helmpath.Home) (*repo.Entry, error) {
+func initLocalRepo(indexFile, cacheFile string, out io.Writer, home helmpath.Home) (*repoconfig.Entry, error) {
 	if fi, err := os.Stat(indexFile); err != nil {
 		fmt.Fprintf(out, "Adding %s repo with URL: %s \n", localRepository, localRepositoryURL)
 		i := repo.NewIndexFile()
@@ -442,7 +443,7 @@ func initLocalRepo(indexFile, cacheFile string, out io.Writer, home helmpath.Hom
 		return nil, fmt.Errorf("%s must be a file, not a directory", indexFile)
 	}
 
-	return &repo.Entry{
+	return &repoconfig.Entry{
 		Name:  localRepository,
 		URL:   localRepositoryURL,
 		Cache: cacheFile,

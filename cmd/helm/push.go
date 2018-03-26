@@ -84,10 +84,10 @@ func (p *pushCmd) run() error {
 	}
 
 	repoName := p.repoName
-	repository, exists := r.Get(repoName)
+	entry, exists := r.Get(repoName)
 	if !exists {
 		return fmt.Errorf("no repo named %q found", repoName)
 	}
 
-	return repository.Push(packageAbsPath, p.namespace)
+	return repo.Push(entry, packageAbsPath, p.namespace)
 }

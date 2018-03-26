@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package chartmuseum // import "k8s.io/helm/pkg/repo/providers/chartmuseum"
+package chartmuseum // import "k8s.io/helm/pkg/repo/provider/chartmuseum"
 
 import (
 	"bytes"

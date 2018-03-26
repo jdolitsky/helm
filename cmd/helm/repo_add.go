@@ -25,6 +25,7 @@ import (
 	"k8s.io/helm/pkg/getter"
 	"k8s.io/helm/pkg/helm/helmpath"
 	"k8s.io/helm/pkg/repo"
+	"k8s.io/helm/pkg/repo/repoconfig"
 )
 
 type repoAddCmd struct {
@@ -93,7 +94,7 @@ func addRepository(name, url, provider, username, password string, home helmpath
 	}
 
 	cif := home.CacheIndex(name)
-	c := repo.Entry{
+	c := repoconfig.Entry{
 		Name:     name,
 		Cache:    cif,
 		URL:      url,

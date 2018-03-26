@@ -14,9 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package config // import "k8s.io/helm/pkg/repo/config"
+package repoconfig // import "k8s.io/helm/pkg/repo/repoconfig"
 
-// TODO: use this everywhere
 // Entry represents a collection of parameters for chart repository
 type Entry struct {
 	Name     string `json:"name"`

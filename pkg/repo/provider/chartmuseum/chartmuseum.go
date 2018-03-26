@@ -14,16 +14,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package chartmuseum // import "k8s.io/helm/pkg/repo/providers/chartmuseum"
+package chartmuseum // import "k8s.io/helm/pkg/repo/provider/chartmuseum"
 
 import (
-	"k8s.io/helm/pkg/repo/config"
+	"k8s.io/helm/pkg/repo/repoconfig"
 )
 
 type (
 	// ChartMuseum is a repo provider for the ChartMuseum web server.
 	ChartMuseum struct {
-		Config *config.Entry
+		Config *repoconfig.Entry
 	}
 
 	errorResponse struct {
@@ -32,7 +32,7 @@ type (
 )
 
 // Init configures a ChartMuseum instance from repo config.
-func (cm *ChartMuseum) Init(config *config.Entry) error {
+func (cm *ChartMuseum) Init(config *repoconfig.Entry) error {
 	cm.Config = config
 	return nil
 }
