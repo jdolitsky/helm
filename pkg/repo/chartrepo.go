@@ -36,12 +36,12 @@ type Entry struct {
 	Name     string `json:"name"`
 	Cache    string `json:"cache"`
 	URL      string `json:"url"`
+	Provider string `json:"provider"`
 	Username string `json:"username"`
 	Password string `json:"password"`
 	CertFile string `json:"certFile"`
 	KeyFile  string `json:"keyFile"`
 	CAFile   string `json:"caFile"`
-	Provider string `json:"provider"`
 }
 
 // ChartRepository represents a chart repository

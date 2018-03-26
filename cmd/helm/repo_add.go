@@ -30,6 +30,7 @@ import (
 type repoAddCmd struct {
 	name     string
 	url      string
+	provider string
 	username string
 	password string
 	home     helmpath.Home
@@ -62,6 +63,7 @@ func newRepoAddCmd(out io.Writer) *cobra.Command {
 	}
 
 	f := cmd.Flags()
+	f.StringVar(&add.provider, "provider", "", "chart repository provider (e.g. chartmuseum)")
 	f.StringVar(&add.username, "username", "", "chart repository username")
 	f.StringVar(&add.password, "password", "", "chart repository password")
 	f.BoolVar(&add.noupdate, "no-update", false, "raise error if repo is already registered")
@@ -73,14 +75,14 @@ func newRepoAddCmd(out io.Writer) *cobra.Command {
 }
 
 func (a *repoAddCmd) run() error {
-	if err := addRepository(a.name, a.url, a.username, a.password, a.home, a.certFile, a.keyFile, a.caFile, a.noupdate); err != nil {
+	if err := addRepository(a.name, a.url, a.provider, a.username, a.password, a.home, a.certFile, a.keyFile, a.caFile, a.noupdate); err != nil {
 		return err
 	}
 	fmt.Fprintf(a.out, "%q has been added to your repositories\n", a.name)
 	return nil
 }
 
-func addRepository(name, url, username, password string, home helmpath.Home, certFile, keyFile, caFile string, noUpdate bool) error {
+func addRepository(name, url, provider, username, password string, home helmpath.Home, certFile, keyFile, caFile string, noUpdate bool) error {
 	f, err := repo.LoadRepositoriesFile(home.RepositoryFile())
 	if err != nil {
 		return err
@@ -95,6 +97,7 @@ func addRepository(name, url, username, password string, home helmpath.Home, cer
 		Name:     name,
 		Cache:    cif,
 		URL:      url,
+		Provider: provider,
 		Username: username,
 		Password: password,
 		CertFile: certFile,

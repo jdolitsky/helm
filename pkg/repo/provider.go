@@ -19,6 +19,7 @@ package repo // import "k8s.io/helm/pkg/repo"
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"k8s.io/helm/pkg/repo/config"
 	"k8s.io/helm/pkg/repo/providers/chartmuseum"
@@ -45,7 +46,7 @@ func (cfg *Entry) GetProvider() (Provider, error) {
 	var err error
 	var exists bool
 
-	provider, exists = providerImplMap[cfg.Provider]
+	provider, exists = providerImplMap[strings.ToLower(cfg.Provider)]
 
 	if exists {
 		err = provider.Init(&config.Entry{Name: cfg.Name, Cache: cfg.Cache, URL: cfg.URL, Username: cfg.Username, Password: cfg.Password, CertFile: cfg.CertFile, KeyFile: cfg.KeyFile, CAFile: cfg.CAFile, Provider: cfg.Provider})
