@@ -35,9 +35,9 @@ var ErrRepoOutOfDate = errors.New("repository file is out of date")
 // RepoFile represents the repositories.yaml file in $HELM_HOME
 // TODO: change type name to File in Helm 3 to resolve linter warning
 type RepoFile struct { // nolint
-	APIVersion   string    `json:"apiVersion"`
-	Generated    time.Time `json:"generated"`
-	Repositories []*Entry  `json:"repositories"`
+	APIVersion   string              `json:"apiVersion"`
+	Generated    time.Time           `json:"generated"`
+	Repositories []*repoconfig.Entry `json:"repositories"`
 }
 
 // NewRepoFile generates an empty repositories file.
