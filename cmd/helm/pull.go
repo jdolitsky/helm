@@ -17,20 +17,21 @@ limitations under the License.
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
-	"path/filepath"
+	"strings"
 
-	"github.com/pkg/errors"
+	"github.com/containerd/containerd/content/local"
+	"github.com/containerd/containerd/images"
+	"github.com/containerd/containerd/remotes"
+	"github.com/containerd/containerd/remotes/docker"
 	"github.com/spf13/cobra"
 
 	"k8s.io/helm/cmd/helm/require"
-	"k8s.io/helm/pkg/chartutil"
-	"k8s.io/helm/pkg/downloader"
-	"k8s.io/helm/pkg/getter"
-	"k8s.io/helm/pkg/repo"
 )
 
 const pullDesc = `
@@ -97,68 +98,67 @@ func newPullCmd(out io.Writer) *cobra.Command {
 	return cmd
 }
 
+// adapted from https://gist.github.com/cpuguy83/541dc445fad44193068a1f8f365a9c0e
 func (o *pullOptions) run(out io.Writer) error {
-	c := downloader.ChartDownloader{
-		HelmHome: settings.Home,
-		Out:      out,
-		Keyring:  o.keyring,
-		Verify:   downloader.VerifyNever,
-		Getters:  getter.All(settings),
-		Username: o.username,
-		Password: o.password,
+	parts := strings.Split(o.chartRef, ":")
+	if len(parts) != 2 {
+		return errors.New("invalid chart format, must be NAME[:TAG|@DIGEST]")
 	}
+	chartName := parts[0]
+	chartVersion := parts[1]
 
-	if o.verify {
-		c.Verify = downloader.VerifyAlways
-	} else if o.verifyLater {
-		c.Verify = downloader.VerifyLater
+	fmt.Printf("%s: Pulling from %s\n", chartVersion, chartName)
+
+	tmpdir, err := ioutil.TempDir(settings.Home.Cache(), ".helm-pull")
+	if err != nil {
+		return err
 	}
-
-	// If untar is set, we fetch to a tempdir, then untar and copy after
-	// verification.
-	dest := o.destdir
-	if o.untar {
-		var err error
-		dest, err = ioutil.TempDir("", "helm-")
-		if err != nil {
-			return errors.Wrap(err, "failed to untar")
+	defer func() {
+		e := recover()
+		if e == nil {
+			return
 		}
-		defer os.RemoveAll(dest)
-	}
+		os.RemoveAll(tmpdir)
+		panic(e)
+	}()
 
-	if o.repoURL != "" {
-		chartURL, err := repo.FindChartInAuthRepoURL(o.repoURL, o.username, o.password, o.chartRef, o.version, o.certFile, o.keyFile, o.caFile, getter.All(settings))
-		if err != nil {
-			return err
-		}
-		o.chartRef = chartURL
-	}
-
-	saved, v, err := c.DownloadTo(o.chartRef, o.version, dest)
+	// this store is a local content addressible store
+	// it satifies the "Ingestor" interface used by the call to `images.Dispatch`
+	cs, err := local.NewStore(settings.Home.Cache())
 	if err != nil {
 		return err
 	}
 
-	if o.verify {
-		fmt.Fprintf(out, "Verification: %v\n", v)
+	resolver := docker.NewResolver(docker.ResolverOptions{})
+	ctx := context.Background()
+
+	name, desc, err := resolver.Resolve(ctx, o.chartRef)
+	if err != nil {
+		return err
 	}
 
-	// After verification, untar the chart into the requested directory.
-	if o.untar {
-		ud := o.untardir
-		if !filepath.IsAbs(ud) {
-			ud = filepath.Join(o.destdir, ud)
-		}
-		if fi, err := os.Stat(ud); err != nil {
-			if err := os.MkdirAll(ud, 0755); err != nil {
-				return errors.Wrap(err, "failed to untar (mkdir)")
-			}
+	fmt.Printf("Digest: %s\n", desc.Digest)
+	fmt.Printf("MediaType: %s\n", desc.MediaType)
 
-		} else if !fi.IsDir() {
-			return errors.Errorf("failed to untar: %s is not a directory", ud)
-		}
-
-		return chartutil.ExpandFile(ud, saved)
+	fetcher, err := resolver.Fetcher(ctx, name)
+	if err != nil {
+		return err
 	}
+
+	r, err := fetcher.Fetch(ctx, desc)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+
+	// Handler which reads a descriptor and fetches the referenced data (e.g. image layers) from the remote
+	h := remotes.FetchHandler(cs, fetcher)
+	// This traverses the OCI descriptor to fetch the image and store it into the local store initialized above.
+	// All content hashes are verified in this step
+	if err := images.Dispatch(ctx, h, desc); err != nil {
+		return err
+	}
+
+	fmt.Printf("Status: Chart is up to date for %s\n", o.chartRef)
 	return nil
 }
