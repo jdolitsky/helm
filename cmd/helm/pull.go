@@ -109,22 +109,25 @@ func (o *pullOptions) run(out io.Writer) error {
 
 	fmt.Printf("%s: Pulling from %s\n", chartVersion, chartName)
 
-	tmpdir, err := ioutil.TempDir(settings.Home.Cache(), ".helm-pull")
+	cacheDir := settings.Home.Cache()
+	os.MkdirAll(cacheDir, os.ModePerm)
+
+	tmpdir, err := ioutil.TempDir(cacheDir, ".helm-pull")
 	if err != nil {
 		return err
 	}
 	defer func() {
 		e := recover()
+		os.RemoveAll(tmpdir)
 		if e == nil {
 			return
 		}
-		os.RemoveAll(tmpdir)
 		panic(e)
 	}()
 
 	// this store is a local content addressible store
 	// it satifies the "Ingestor" interface used by the call to `images.Dispatch`
-	cs, err := local.NewStore(settings.Home.Cache())
+	cs, err := local.NewStore(cacheDir)
 	if err != nil {
 		return err
 	}
@@ -151,8 +154,9 @@ func (o *pullOptions) run(out io.Writer) error {
 	}
 	defer r.Close()
 
-	// Handler which reads a descriptor and fetches the referenced data (e.g. image layers) from the remote
-	h := remotes.FetchHandler(cs, fetcher)
+	// Handler which reads a descriptor and fetches the referenced data (e.g. image layers) from the remote, recursively
+	h := images.Handlers(remotes.FetchHandler(cs, fetcher), images.ChildrenHandler(cs))
+
 	// This traverses the OCI descriptor to fetch the image and store it into the local store initialized above.
 	// All content hashes are verified in this step
 	if err := images.Dispatch(ctx, h, desc); err != nil {
