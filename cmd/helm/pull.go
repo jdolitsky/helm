@@ -17,9 +17,13 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"io/ioutil"
 
+	"github.com/containerd/containerd/remotes/docker"
+	"github.com/shizhMSFT/oras/pkg/oras"
 	"github.com/spf13/cobra"
 
 	"k8s.io/helm/cmd/helm/require"
@@ -90,6 +94,24 @@ func newPullCmd(out io.Writer) *cobra.Command {
 }
 
 func (o *pullOptions) run(out io.Writer) error {
+	ctx := context.Background()
+	resolver := docker.NewResolver(docker.ResolverOptions{})
+
 	fmt.Printf("Pulling %s\n", o.chartRef)
+
+	allowedMediaTypes := []string{"application/vnd.helm.chart"}
+	pullContents, err := oras.Pull(ctx, resolver, o.chartRef, allowedMediaTypes...)
+	if err != nil {
+		return err
+	}
+
+	for name, blob := range pullContents {
+		fmt.Printf("Saving %s\n", name)
+		err := ioutil.WriteFile(name, blob.Content, 0644)
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
