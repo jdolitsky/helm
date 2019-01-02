@@ -29,7 +29,7 @@
   revision = "d6e3b3328b783f23731bc4d058875b0371ff8109"
 
 [[projects]]
-  digest = "1:e459ba6116a6060a8a3055c0b916fd15a2cbc62e37e164f9616c31d8e27f79f3"
+  digest = "1:1cd7c78615a24f1f886b7c23d9a1d323dee3c36e76c0a64a348ab72036be90bf"
   name = "github.com/Azure/go-autorest"
   packages = [
     "autorest",
@@ -38,7 +38,6 @@
     "autorest/date",
     "logger",
     "tracing",
-    "version",
   ]
   pruneopts = "UT"
   revision = "f401b1ccc8eb505927fae7a0c7f6406d37ca1c7e"
@@ -83,38 +82,6 @@
   pruneopts = "UT"
   revision = "3084677c2c188840777bff30054f2b553729d329"
   version = "v1.11.1"
-
-[[projects]]
-  digest = "1:f9ae348e1f793dcf9ed930ed47136a67343dbd6809c5c91391322267f4476892"
-  name = "github.com/Microsoft/go-winio"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "97e4973ce50b2ff5f09635a57e2b88a037aae829"
-  version = "v0.4.11"
-
-[[projects]]
-  digest = "1:84c1e430d2a4be548bb8023fd9d595eab555808c160c078a2feb7f98e07eaa57"
-  name = "github.com/Microsoft/hcsshim"
-  packages = [
-    ".",
-    "internal/guestrequest",
-    "internal/guid",
-    "internal/hcs",
-    "internal/hcserror",
-    "internal/hns",
-    "internal/interop",
-    "internal/logfields",
-    "internal/longpath",
-    "internal/mergemaps",
-    "internal/safefile",
-    "internal/schema1",
-    "internal/schema2",
-    "internal/timeout",
-    "internal/wclayer",
-  ]
-  pruneopts = "UT"
-  revision = "a83b08327360d83bedf49f8d9f732596dfc13df4"
-  version = "v0.8.3"
 
 [[projects]]
   digest = "1:d1665c44bd5db19aaee18d1b6233c99b0b9a986e8bccb24ef54747547a48027f"
@@ -175,40 +142,21 @@
   revision = "bf70f2a70fb1b1f36d90d671a72795984eab0fcb"
 
 [[projects]]
-  digest = "1:c4517339048c8fe80766f37da6932f85b262571202d7c4880ca13456aa71fa6d"
+  digest = "1:1872596d45cb52913fcdea90d468f3e57435959e9c0d99ccb316ee76de341313"
   name = "github.com/containerd/containerd"
   packages = [
     "content",
-    "content/local",
     "errdefs",
-    "filters",
     "images",
     "log",
     "platforms",
     "reference",
     "remotes",
     "remotes/docker",
-    "sys",
   ]
   pruneopts = "UT"
   revision = "9b32062dc1f5a7c2564315c269b5059754f12b9d"
   version = "v1.2.1"
-
-[[projects]]
-  branch = "master"
-  digest = "1:b3175aa9299c7c81134df7cffce8c08d40021ee35fc81a513e88f77b83348e56"
-  name = "github.com/containerd/continuity"
-  packages = [
-    ".",
-    "devices",
-    "driver",
-    "pathdriver",
-    "proto",
-    "syscallx",
-    "sysx",
-  ]
-  pruneopts = "UT"
-  revision = "004b46473808b3e7a4a3049c20e4376c91eb966d"
 
 [[projects]]
   digest = "1:7cb4fdca4c251b3ef8027c90ea35f70c7b661a593b9eeae34753c65499098bb1"
@@ -591,14 +539,6 @@
   version = "v1.0.1"
 
 [[projects]]
-  digest = "1:e8f0344f0e8e75ffa7a917d524afed0fcd7288d6ad1f206750205d56d0082b13"
-  name = "github.com/opencontainers/runc"
-  packages = ["libcontainer/system"]
-  pruneopts = "UT"
-  revision = "baf6536d6259209c3edfa2b22237af82942d3dfa"
-  version = "v0.1.1"
-
-[[projects]]
   branch = "master"
   digest = "1:3bf17a6e6eaa6ad24152148a631d18662f7212e21637c2699bff3369b7f00fa2"
   name = "github.com/petar/GoLLRB"
@@ -637,6 +577,14 @@
   pruneopts = "UT"
   revision = "05f3235734ad95d0016f6a23902f06461fcf567a"
   version = "v1.5.2"
+
+[[projects]]
+  digest = "1:ab479ef977fdb243a879bb75ef7e2b4be4c1a2315b813b942c8f6bbbe9aee91d"
+  name = "github.com/shizhMSFT/oras"
+  packages = ["pkg/oras"]
+  pruneopts = "UT"
+  revision = "3e12356bb4bc398b12106927796df65382481159"
+  version = "v0.2.0"
 
 [[projects]]
   digest = "1:69b1cc331fca23d702bd72f860c6a647afd0aa9fcbc1d0659b1365e26546dd70"
@@ -1399,9 +1347,6 @@
     "github.com/Masterminds/sprig",
     "github.com/Masterminds/vcs",
     "github.com/asaskevich/govalidator",
-    "github.com/containerd/containerd/content/local",
-    "github.com/containerd/containerd/images",
-    "github.com/containerd/containerd/remotes",
     "github.com/containerd/containerd/remotes/docker",
     "github.com/evanphx/json-patch",
     "github.com/ghodss/yaml",
@@ -1410,6 +1355,7 @@
     "github.com/gosuri/uitable/util/strutil",
     "github.com/mattn/go-shellwords",
     "github.com/pkg/errors",
+    "github.com/shizhMSFT/oras/pkg/oras",
     "github.com/spf13/cobra",
     "github.com/spf13/cobra/doc",
     "github.com/spf13/pflag",
