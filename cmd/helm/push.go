@@ -19,11 +19,13 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/containerd/containerd/remotes/docker"
-	"github.com/shizhMSFT/oras/pkg/oras"
 	"io"
 	"io/ioutil"
 
+	"github.com/containerd/containerd/remotes/docker"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/shizhMSFT/oras/pkg/content"
+	"github.com/shizhMSFT/oras/pkg/oras"
 	"github.com/spf13/cobra"
 
 	"k8s.io/helm/cmd/helm/require"
@@ -57,20 +59,18 @@ func newPushCmd(out io.Writer) *cobra.Command {
 }
 
 func (o *pushOptions) run(out io.Writer) error {
-	content, err := ioutil.ReadFile(o.file)
+	fileContent, err := ioutil.ReadFile(o.file)
 	if err != nil {
 		return err
 	}
 
 	ctx := context.Background()
 	resolver := docker.NewResolver(docker.ResolverOptions{})
+	memoryStore := content.NewMemoryStore()
 
-	pushContents := make(map[string]oras.Blob)
-	pushContents[o.file] = oras.Blob{
-		Content:   content,
-		MediaType: "application/vnd.helm.chart",
-	}
+	desc := memoryStore.Add(o.file, "application/vnd.helm.chart", fileContent)
+	pushContents := []ocispec.Descriptor{desc}
 
 	fmt.Printf("Pushing %s to %s\n", o.file, o.ref)
-	return oras.Push(ctx, resolver, o.ref, pushContents)
+	return oras.Push(ctx, resolver, o.ref, memoryStore, pushContents)
 }

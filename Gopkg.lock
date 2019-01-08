@@ -579,12 +579,15 @@
   version = "v1.5.2"
 
 [[projects]]
-  digest = "1:ab479ef977fdb243a879bb75ef7e2b4be4c1a2315b813b942c8f6bbbe9aee91d"
+  digest = "1:3722ee02018abf309d2bc7e2a44c05032d514b8bd42ff52fb3e303b1a3ff81ae"
   name = "github.com/shizhMSFT/oras"
-  packages = ["pkg/oras"]
+  packages = [
+    "pkg/content",
+    "pkg/oras",
+  ]
   pruneopts = "UT"
-  revision = "3e12356bb4bc398b12106927796df65382481159"
-  version = "v0.2.0"
+  revision = "9499859cba37fe7358fcc7b78113b05a850f65fa"
+  version = "v0.3.0"
 
 [[projects]]
   digest = "1:69b1cc331fca23d702bd72f860c6a647afd0aa9fcbc1d0659b1365e26546dd70"

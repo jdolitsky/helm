@@ -20,9 +20,9 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 
 	"github.com/containerd/containerd/remotes/docker"
+	"github.com/shizhMSFT/oras/pkg/content"
 	"github.com/shizhMSFT/oras/pkg/oras"
 	"github.com/spf13/cobra"
 
@@ -96,22 +96,11 @@ func newPullCmd(out io.Writer) *cobra.Command {
 func (o *pullOptions) run(out io.Writer) error {
 	ctx := context.Background()
 	resolver := docker.NewResolver(docker.ResolverOptions{})
+	fileStore := content.NewFileStore("")
 
 	fmt.Printf("Pulling %s\n", o.chartRef)
 
 	allowedMediaTypes := []string{"application/vnd.helm.chart"}
-	pullContents, err := oras.Pull(ctx, resolver, o.chartRef, allowedMediaTypes...)
-	if err != nil {
-		return err
-	}
-
-	for name, blob := range pullContents {
-		fmt.Printf("Saving %s\n", name)
-		err := ioutil.WriteFile(name, blob.Content, 0644)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
+	_, err := oras.Pull(ctx, resolver, o.chartRef, fileStore, allowedMediaTypes...)
+	return err
 }
