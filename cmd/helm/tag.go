@@ -109,6 +109,7 @@ func (o *tagOptions) run(out io.Writer) error {
 	fmt.Fprintln(out, digestFile)
 
 	tagFile := filepath.Join(destDir, refTag)
+	os.Remove(tagFile)
 	err = os.Symlink(digestFile, tagFile)
 	if err != nil {
 		return err
