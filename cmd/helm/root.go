@@ -70,6 +70,7 @@ func newRootCmd(c helm.Interface, out io.Writer, args []string) *cobra.Command {
 		newRepoCmd(out),
 		newSearchCmd(out),
 		newVerifyCmd(out),
+		newTagCmd(out),
 
 		// release commands
 		newGetCmd(c, out),
