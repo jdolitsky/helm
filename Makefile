@@ -114,6 +114,8 @@ ifndef HAS_GOX
 	go get -u github.com/mitchellh/gox
 endif
 	dep ensure -vendor-only
+	rm -rf vendor/github.com/docker/docker/integration-cli
+	rm -rf vendor/k8s.io/kubernetes/{.bazelrc,.kazelcfg.json,BUILD.bazel,Makefile,Makefile.generated_files,WORKSPACE,cluster}
 
 .PHONY: info
 info:
