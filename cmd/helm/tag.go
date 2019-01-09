@@ -106,8 +106,6 @@ func (o *tagOptions) run(out io.Writer) error {
 		return err
 	}
 
-	fmt.Fprintln(out, digestFile)
-
 	tagFile := filepath.Join(destDir, refTag)
 	os.Remove(tagFile)
 	err = os.Symlink(digestFile, tagFile)
@@ -115,6 +113,6 @@ func (o *tagOptions) run(out io.Writer) error {
 		return err
 	}
 
-	fmt.Fprintln(out, tagFile)
+	fmt.Fprintf(out, "repo: %s\ntag: %s\ndigest: %s\n", refName, refTag, digest)
 	return nil
 }
