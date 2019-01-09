@@ -586,8 +586,8 @@
     "pkg/oras",
   ]
   pruneopts = "UT"
-  revision = "9499859cba37fe7358fcc7b78113b05a850f65fa"
-  version = "v0.3.0"
+  revision = "0e921ccfaf27d6a1c01d86d3407d7d1b93f4f57f"
+  version = "v0.3.1"
 
 [[projects]]
   digest = "1:69b1cc331fca23d702bd72f860c6a647afd0aa9fcbc1d0659b1365e26546dd70"
@@ -1357,7 +1357,9 @@
     "github.com/gosuri/uitable",
     "github.com/gosuri/uitable/util/strutil",
     "github.com/mattn/go-shellwords",
+    "github.com/opencontainers/image-spec/specs-go/v1",
     "github.com/pkg/errors",
+    "github.com/shizhMSFT/oras/pkg/content",
     "github.com/shizhMSFT/oras/pkg/oras",
     "github.com/spf13/cobra",
     "github.com/spf13/cobra/doc",
