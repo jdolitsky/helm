@@ -21,12 +21,16 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"path/filepath"
+	"strings"
+	"errors"
 
 	"github.com/containerd/containerd/remotes/docker"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/shizhMSFT/oras/pkg/content"
 	"github.com/shizhMSFT/oras/pkg/oras"
 	"github.com/spf13/cobra"
+	"k8s.io/helm/pkg/helm/helmpath"
 
 	"k8s.io/helm/cmd/helm/require"
 )
@@ -36,21 +40,21 @@ TODO
 `
 
 type pushOptions struct {
-	file string
 	ref  string
+	home helmpath.Home
 }
 
 func newPushCmd(out io.Writer) *cobra.Command {
 	o := &pushOptions{}
 
 	cmd := &cobra.Command{
-		Use:   "push [file] [ref] [...]",
+		Use:   "push [ref] [...]",
 		Short: "upload a chart to a registry",
 		Long:  pushDesc,
-		Args:  require.MinimumNArgs(2),
+		Args:  require.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			o.file = args[0]
-			o.ref = args[1]
+			o.home = settings.Home
+			o.ref = args[0]
 			return o.run(out)
 		},
 	}
@@ -59,7 +63,17 @@ func newPushCmd(out io.Writer) *cobra.Command {
 }
 
 func (o *pushOptions) run(out io.Writer) error {
-	fileContent, err := ioutil.ReadFile(o.file)
+	parts := strings.Split(o.ref, ":")
+	if len(parts) < 2 {
+		return errors.New("ref should be in the format name[:tag|@digest]")
+	}
+
+	lastIndex := len(parts) - 1
+	refName := strings.Join(parts[0:lastIndex], ":")
+	refTag := parts[lastIndex]
+
+	blobLink := filepath.Join(o.home.Registry(), refName, refTag)
+	fileContent, err := ioutil.ReadFile(blobLink)
 	if err != nil {
 		return err
 	}
@@ -68,9 +82,9 @@ func (o *pushOptions) run(out io.Writer) error {
 	resolver := docker.NewResolver(docker.ResolverOptions{})
 	memoryStore := content.NewMemoryStore()
 
-	desc := memoryStore.Add(o.file, "application/vnd.helm.chart", fileContent)
+	desc := memoryStore.Add("bingo", "application/vnd.helm.chart", fileContent)
 	pushContents := []ocispec.Descriptor{desc}
 
-	fmt.Printf("Pushing %s to %s\n", o.file, o.ref)
+	fmt.Fprintf(out, "Pushing %s\n", o.ref)
 	return oras.Push(ctx, resolver, o.ref, memoryStore, pushContents)
 }

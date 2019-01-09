@@ -18,13 +18,19 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/shizhMSFT/oras/pkg/content"
 	"github.com/shizhMSFT/oras/pkg/oras"
 	"github.com/spf13/cobra"
+	"k8s.io/helm/pkg/helm/helmpath"
 
 	"k8s.io/helm/cmd/helm/require"
 )
@@ -52,6 +58,7 @@ type pullOptions struct {
 	verifyLater bool   // --prov
 
 	chartRef string
+	home     helmpath.Home
 
 	chartPathOptions
 }
@@ -66,6 +73,7 @@ func newPullCmd(out io.Writer) *cobra.Command {
 		Long:    pullDesc,
 		Args:    require.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			o.home = settings.Home
 			if o.version == "" && o.devel {
 				debug("setting version to >0.0.0-0")
 				o.version = ">0.0.0-0"
@@ -94,13 +102,49 @@ func newPullCmd(out io.Writer) *cobra.Command {
 }
 
 func (o *pullOptions) run(out io.Writer) error {
+	parts := strings.Split(o.chartRef, ":")
+	if len(parts) < 2 {
+		return errors.New("ref should be in the format name[:tag|@digest]")
+	}
+
+	lastIndex := len(parts) - 1
+	refName := strings.Join(parts[0:lastIndex], ":")
+	refTag := parts[lastIndex]
+
+	destDir := filepath.Join(o.home.Registry(), refName)
+	os.MkdirAll(destDir, 0755)
+
 	ctx := context.Background()
 	resolver := docker.NewResolver(docker.ResolverOptions{})
-	fileStore := content.NewFileStore("")
+	memoryStore := content.NewMemoryStore()
 
 	fmt.Printf("Pulling %s\n", o.chartRef)
 
+	// oras push localhost:5000/wp:5.0.2 wordpress-5.0.2.tgz:application/vnd.helm.chart
 	allowedMediaTypes := []string{"application/vnd.helm.chart"}
-	_, err := oras.Pull(ctx, resolver, o.chartRef, fileStore, allowedMediaTypes...)
-	return err
+	pullContents, err := oras.Pull(ctx, resolver, o.chartRef, memoryStore, allowedMediaTypes...)
+	if err != nil {
+		return err
+	}
+
+	for _, descriptor := range pullContents {
+		digest := descriptor.Digest.Hex()
+		_, content, ok := memoryStore.Get(descriptor)
+		if !ok {
+			return errors.New("error accessing pulled content")
+		}
+		blobPath := filepath.Join(destDir, digest)
+		err := ioutil.WriteFile(blobPath, content, 0644)
+		if err != nil {
+			return err
+		}
+		tagPath := filepath.Join(destDir, refTag)
+		os.Remove(tagPath)
+		err = os.Symlink(blobPath, tagPath)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
