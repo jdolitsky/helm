@@ -205,6 +205,14 @@
   revision = "2cb26cfe9cbf8a64c5046c74d65f4528b22e67f4"
 
 [[projects]]
+  digest = "1:6f82cacd0af5921e99bf3f46748705239b36489464f4529a1589bc895764fb18"
+  name = "github.com/docker/go-units"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "47565b4f722fb6ceae66b95f853feed578a4a51c"
+  version = "v0.3.3"
+
+[[projects]]
   branch = "master"
   digest = "1:ecdc8e0fe3bc7d549af1c9c36acf3820523b707d6c071b6d0c3860882c6f7b42"
   name = "github.com/docker/spdystream"
@@ -1351,6 +1359,7 @@
     "github.com/Masterminds/vcs",
     "github.com/asaskevich/govalidator",
     "github.com/containerd/containerd/remotes/docker",
+    "github.com/docker/go-units",
     "github.com/evanphx/json-patch",
     "github.com/ghodss/yaml",
     "github.com/gobwas/glob",

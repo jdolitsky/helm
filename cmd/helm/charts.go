@@ -18,10 +18,12 @@ package main
 
 import (
 	"fmt"
+	"github.com/docker/go-units"
 	"github.com/gosuri/uitable"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	// "fmt"
 	"github.com/spf13/cobra"
@@ -71,7 +73,7 @@ func (o *chartsOptions) run(out io.Writer) error {
 				repo := strings.TrimRight(strings.TrimSuffix(pathX, tag), "/\\")
 				if base := filepath.Base(blobPath); len(base) == 64 {
 					id := base[:12]
-					created := blobFileInfo.ModTime()
+					created := units.HumanDuration(time.Now().UTC().Sub(blobFileInfo.ModTime()))
 					size := byteCountBinary(blobFileInfo.Size())
 					table.AddRow(repo, tag, id, created, size)
 				}
