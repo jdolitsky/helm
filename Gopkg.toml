@@ -66,3 +66,6 @@
 [prune]
   go-tests = true
   unused-packages = true
+
+[[constraint]]
+  name = "github.com/stretchr/testify"

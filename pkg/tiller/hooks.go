@@ -44,13 +44,6 @@ var events = map[string]release.HookEvent{
 	hooks.ReleaseTestFailure: release.HookReleaseTestFailure,
 }
 
-// deletePolices represents a mapping between the key in the annotation for label deleting policy and its real meaning
-var deletePolices = map[string]release.HookDeletePolicy{
-	hooks.HookSucceeded:      release.HookSucceeded,
-	hooks.HookFailed:         release.HookFailed,
-	hooks.BeforeHookCreation: release.HookBeforeHookCreation,
-}
-
 // Manifest represents a manifest file, which has a name and some content.
 type Manifest struct {
 	Name    string
@@ -69,7 +62,7 @@ type manifestFile struct {
 	apis    chartutil.VersionSet
 }
 
-// sortManifests takes a map of filename/YAML contents, splits the file
+// SortManifests takes a map of filename/YAML contents, splits the file
 // by manifest entries, and sorts the entries into hook types.
 //
 // The resulting hooks struct will be populated with all of the generated hooks.
