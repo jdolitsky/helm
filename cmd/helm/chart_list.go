@@ -26,21 +26,21 @@ import (
 	"k8s.io/helm/pkg/registry"
 )
 
-const chartsDesc = `
+const chartListDesc = `
 TODO
 `
 
-type chartsOptions struct {
+type chartListOptions struct {
 	home helmpath.Home
 }
 
-func newChartsCmd(out io.Writer) *cobra.Command {
-	o := &chartsOptions{}
+func newChartListCmd(out io.Writer) *cobra.Command {
+	o := &chartListOptions{}
 
 	cmd := &cobra.Command{
-		Use:   "charts",
+		Use:   "list",
 		Short: "list all charts stored locally",
-		Long:  chartsDesc,
+		Long:  chartListDesc,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			o.home = settings.Home
 			return o.run(out)
@@ -50,7 +50,7 @@ func newChartsCmd(out io.Writer) *cobra.Command {
 	return cmd
 }
 
-func (o *chartsOptions) run(out io.Writer) error {
+func (o *chartListOptions) run(out io.Writer) error {
 	table, err := registry.ListCharts(o.home)
 	if err != nil {
 		return err
