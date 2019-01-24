@@ -44,11 +44,8 @@ func newChartsCmd(out io.Writer) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "charts",
-		Short: "list all charts in local cache",
+		Short: "list all charts stored locally",
 		Long:  chartsDesc,
-		Args: func(cmd *cobra.Command, args []string) error {
-			return nil
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			o.home = settings.Home
 			return o.run(out)
@@ -60,6 +57,12 @@ func newChartsCmd(out io.Writer) *cobra.Command {
 
 // TODO: move alot of this to pkg/
 func (o *chartsOptions) run(out io.Writer) error {
+
+	// 1. Create new ui table
+	// 2. Obtain a pager
+	// 3. for loop on pager, add rows
+	// 4. print ui table
+
 	table := uitable.New()
 	table.MaxColWidth = 60
 	table.AddRow("REPOSITORY", "TAG", "CHART ID", "CREATED", "SIZE")
@@ -82,7 +85,7 @@ func (o *chartsOptions) run(out io.Writer) error {
 		return nil
 	}
 
-	os.Chdir(o.home.Registry())
+	os.Chdir(filepath.Join(o.home.Registry(), "refs"))
 	filepath.Walk(".", ff)
 
 	fmt.Fprintln(out, table.String())

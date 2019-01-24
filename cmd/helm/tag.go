@@ -64,6 +64,12 @@ func newTagCmd(out io.Writer) *cobra.Command {
 
 // TODO: move alot of this to pkg/
 func (o *tagOptions) run(out io.Writer) error {
+
+	// 1. convert o.path to chart obj
+	// 2. Create resolver
+	// 3. Make sure o.ref resolves
+	// 4. save chart into HELM_HOME
+
 	path, err := filepath.Abs(o.path)
 	if err != nil {
 		return err
@@ -83,7 +89,8 @@ func (o *tagOptions) run(out io.Writer) error {
 	refName := strings.Join(parts[0:lastIndex], ":")
 	refTag := parts[lastIndex]
 
-	destDir := filepath.Join(o.home.Registry(), refName)
+	//destDir := filepath.Join(o.home.Registry(), refName)
+	destDir := filepath.Join(o.home.Registry(), "blobs", "sha256")
 	os.MkdirAll(destDir, 0755)
 	tmpFile, err := chartutil.Save(ch, destDir)
 	if err != nil {
@@ -106,9 +113,11 @@ func (o *tagOptions) run(out io.Writer) error {
 		return err
 	}
 
-	tagFile := filepath.Join(destDir, refTag)
-	os.Remove(tagFile)
-	err = os.Symlink(digestFile, tagFile)
+	tagDir := filepath.Join(o.home.Registry(), "refs", refName)
+	os.MkdirAll(tagDir, 0755)
+	tagPath := filepath.Join(tagDir, refTag)
+	os.Remove(tagPath)
+	err = os.Symlink(digestFile, tagPath)
 	if err != nil {
 		return err
 	}

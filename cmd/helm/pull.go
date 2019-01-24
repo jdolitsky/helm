@@ -36,73 +36,41 @@ import (
 )
 
 const pullDesc = `
-Retrieve a package from a package repository, and download it locally.
-
-This is useful for fetching packages to inspect, modify, or repackage. It can
-also be used to perform cryptographic verification of a chart without installing
-the chart.
-
-There are options for unpacking the chart after download. This will create a
-directory for the chart and uncompress into that directory.
-
-If the --verify flag is specified, the requested chart MUST have a provenance
-file, and MUST pass the verification process. Failure in any part of this will
-result in an error, and the chart will not be saved locally.
+TODO
 `
 
 type pullOptions struct {
-	destdir     string // --destination
-	devel       bool   // --devel
-	untar       bool   // --untar
-	untardir    string // --untardir
-	verifyLater bool   // --prov
-
-	chartRef string
-	home     helmpath.Home
-
-	chartPathOptions
+	ref  string
+	home helmpath.Home
 }
 
 func newPullCmd(out io.Writer) *cobra.Command {
 	o := &pullOptions{}
 
 	cmd := &cobra.Command{
-		Use:     "pull [chart URL | repo/chartname] [...]",
-		Short:   "download a chart from a repository and (optionally) unpack it in local directory",
+		Use:     "pull [ref] [...]",
+		Short:   "download a chart from a registry",
 		Aliases: []string{"fetch"},
 		Long:    pullDesc,
 		Args:    require.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			o.home = settings.Home
-			if o.version == "" && o.devel {
-				debug("setting version to >0.0.0-0")
-				o.version = ">0.0.0-0"
-			}
-
-			for i := 0; i < len(args); i++ {
-				o.chartRef = args[i]
-				if err := o.run(out); err != nil {
-					return err
-				}
-			}
-			return nil
+			o.ref = args[0]
+			return o.run(out)
 		},
 	}
-
-	f := cmd.Flags()
-	f.BoolVar(&o.devel, "devel", false, "use development versions, too. Equivalent to version '>0.0.0-0'. If --version is set, this is ignored.")
-	f.BoolVar(&o.untar, "untar", false, "if set to true, will untar the chart after downloading it")
-	f.BoolVar(&o.verifyLater, "prov", false, "fetch the provenance file, but don't perform verification")
-	f.StringVar(&o.untardir, "untardir", ".", "if untar is specified, this flag specifies the name of the directory into which the chart is expanded")
-	f.StringVarP(&o.destdir, "destination", "d", ".", "location to write the chart. If this and tardir are specified, tardir is appended to this")
-
-	o.chartPathOptions.addFlags(f)
 
 	return cmd
 }
 
 func (o *pullOptions) run(out io.Writer) error {
-	parts := strings.Split(o.chartRef, ":")
+
+	// 1. Create resolver
+	// 2. Make sure o.ref resolves
+	// 3. Attempt pull chart and validate
+	// 4. save chart into HELM_HOME
+
+	parts := strings.Split(o.ref, ":")
 	if len(parts) < 2 {
 		return errors.New("ref should be in the format name[:tag|@digest]")
 	}
@@ -111,18 +79,18 @@ func (o *pullOptions) run(out io.Writer) error {
 	refName := strings.Join(parts[0:lastIndex], ":")
 	refTag := parts[lastIndex]
 
-	destDir := filepath.Join(o.home.Registry(), refName)
+	destDir := filepath.Join(o.home.Registry(), "blobs", "sha256")
 	os.MkdirAll(destDir, 0755)
 
 	ctx := context.Background()
 	resolver := docker.NewResolver(docker.ResolverOptions{})
 	memoryStore := content.NewMemoryStore()
 
-	fmt.Printf("Pulling %s\n", o.chartRef)
+	fmt.Printf("Pulling %s\n", o.ref)
 
 	// oras push localhost:5000/wp:5.0.2 wordpress-5.0.2.tgz:application/vnd.helm.chart
 	allowedMediaTypes := []string{"application/vnd.helm.chart"}
-	pullContents, err := oras.Pull(ctx, resolver, o.chartRef, memoryStore, allowedMediaTypes...)
+	pullContents, err := oras.Pull(ctx, resolver, o.ref, memoryStore, allowedMediaTypes...)
 	if err != nil {
 		return err
 	}
@@ -138,7 +106,9 @@ func (o *pullOptions) run(out io.Writer) error {
 		if err != nil {
 			return err
 		}
-		tagPath := filepath.Join(destDir, refTag)
+		tagDir := filepath.Join(o.home.Registry(), "refs", refName)
+		os.MkdirAll(tagDir, 0755)
+		tagPath := filepath.Join(tagDir, refTag)
 		os.Remove(tagPath)
 		err = os.Symlink(blobPath, tagPath)
 		if err != nil {

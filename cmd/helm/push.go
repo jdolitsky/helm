@@ -63,6 +63,11 @@ func newPushCmd(out io.Writer) *cobra.Command {
 }
 
 func (o *pushOptions) run(out io.Writer) error {
+
+	// 1. Create resolver
+	// 2. Make sure o.ref resolves
+	// 3. Attempt push chart to o.ref
+
 	parts := strings.Split(o.ref, ":")
 	if len(parts) < 2 {
 		return errors.New("ref should be in the format name[:tag|@digest]")
