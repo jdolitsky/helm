@@ -18,17 +18,12 @@ package main
 
 import (
 	"fmt"
-	"github.com/docker/go-units"
-	"github.com/gosuri/uitable"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
-
-	// "fmt"
-	"github.com/spf13/cobra"
 	"io"
+
+	"github.com/spf13/cobra"
+
 	"k8s.io/helm/pkg/helm/helmpath"
+	"k8s.io/helm/pkg/registry"
 )
 
 const chartsDesc = `
@@ -55,52 +50,11 @@ func newChartsCmd(out io.Writer) *cobra.Command {
 	return cmd
 }
 
-// TODO: move alot of this to pkg/
 func (o *chartsOptions) run(out io.Writer) error {
-
-	// 1. Create new ui table
-	// 2. Obtain a pager
-	// 3. for loop on pager, add rows
-	// 4. print ui table
-
-	table := uitable.New()
-	table.MaxColWidth = 60
-	table.AddRow("REPOSITORY", "TAG", "CHART ID", "CREATED", "SIZE")
-
-	var ff = func(pathX string, infoX os.FileInfo, errX error) error {
-		blobPath, err := os.Readlink(pathX) // check if this is a symlink (tag)
-		if err == nil {
-			blobFileInfo, err := os.Stat(blobPath)
-			if err == nil {
-				tag := filepath.Base(pathX)
-				repo := strings.TrimRight(strings.TrimSuffix(pathX, tag), "/\\")
-				if base := filepath.Base(blobPath); len(base) == 64 {
-					id := base[:12]
-					created := units.HumanDuration(time.Now().UTC().Sub(blobFileInfo.ModTime()))
-					size := byteCountBinary(blobFileInfo.Size())
-					table.AddRow(repo, tag, id, created, size)
-				}
-			}
-		}
-		return nil
+	table, err := registry.ListCharts(o.home)
+	if err != nil {
+		return err
 	}
-
-	os.Chdir(filepath.Join(o.home.Registry(), "refs"))
-	filepath.Walk(".", ff)
-
-	fmt.Fprintln(out, table.String())
-	return nil
-}
-
-func byteCountBinary(b int64) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
+	_, err = fmt.Fprintln(out, table)
+	return err
 }
