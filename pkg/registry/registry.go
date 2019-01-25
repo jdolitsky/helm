@@ -27,6 +27,10 @@ import (
 	"time"
 )
 
+const (
+	HelmChartPackageMediaType = "application/vnd.cncf.helm.chart.v1.tar+gzip"
+)
+
 func TagChart() error {
 	return nil
 }
@@ -47,7 +51,7 @@ func ListCharts(home helmpath.Home) (string, error) {
 
 	table := uitable.New()
 	table.MaxColWidth = 60
-	table.AddRow("REPOSITORY", "TAG", "CHART ID", "CREATED", "SIZE")
+	table.AddRow("REF", "NAME", "VERSION", "DIGEST", "SIZE", "CREATED")
 
 	var ff = func(pathX string, infoX os.FileInfo, errX error) error {
 		blobPath, err := os.Readlink(pathX) // check if this is a symlink (tag)
@@ -56,18 +60,20 @@ func ListCharts(home helmpath.Home) (string, error) {
 			if err == nil {
 				tag := filepath.Base(pathX)
 				repo := strings.TrimRight(strings.TrimSuffix(pathX, tag), "/\\")
-				if base := filepath.Base(blobPath); len(base) == 64 {
-					id := base[:12]
+				if digest := filepath.Base(blobPath); len(digest) == 64 {
 					created := units.HumanDuration(time.Now().UTC().Sub(blobFileInfo.ModTime()))
 					size := byteCountBinary(blobFileInfo.Size())
-					table.AddRow(repo, tag, id, created, size)
+					name := filepath.Base(repo)
+					table.AddRow(fmt.Sprintf("%s:%s", repo, tag), name, tag, digest[:12], size, created)
 				}
 			}
 		}
 		return nil
 	}
 
-	err := os.Chdir(filepath.Join(home.Registry(), "refs"))
+	refsDir := filepath.Join(home.Registry(), "refs")
+	os.MkdirAll(refsDir, 0755)
+	err := os.Chdir(refsDir)
 	if err != nil {
 		return "", err
 	}

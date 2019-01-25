@@ -23,25 +23,24 @@ import (
 	"github.com/spf13/cobra"
 
 	"k8s.io/helm/pkg/helm/helmpath"
-	"k8s.io/helm/pkg/registry"
 )
 
-const chartListDesc = `
+const chartRemoveDesc = `
 TODO
 `
 
-type chartListOptions struct {
+type chartRemoveOptions struct {
 	home helmpath.Home
 }
 
-func newChartListCmd(out io.Writer) *cobra.Command {
-	o := &chartListOptions{}
+func newChartRemoveCmd(out io.Writer) *cobra.Command {
+	o := &chartRemoveOptions{}
 
 	cmd := &cobra.Command{
-		Use:     "list",
-		Aliases: []string{"ls"},
-		Short:   "list all saved charts",
-		Long:    chartListDesc,
+		Use:     "remove",
+		Aliases: []string{"rm"},
+		Short:   "remove a chart",
+		Long:    chartRemoveDesc,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			o.home = settings.Home
 			return o.run(out)
@@ -51,11 +50,7 @@ func newChartListCmd(out io.Writer) *cobra.Command {
 	return cmd
 }
 
-func (o *chartListOptions) run(out io.Writer) error {
-	table, err := registry.ListCharts(o.home)
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintln(out, table)
+func (o *chartRemoveOptions) run(out io.Writer) error {
+	_, err := fmt.Fprintln(out, "not yet implemented")
 	return err
 }

@@ -16,9 +16,9 @@ limitations under the License.
 package main
 
 import (
-	"io"
-
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"io"
 )
 
 const chartHelp = `
@@ -36,11 +36,16 @@ func newChartCmd(out io.Writer) *cobra.Command {
 		Long:  chartHelp,
 	}
 	cmd.AddCommand(
-		// newChartPushCmd(out),
-		// newChartPullCmd(out),
-		// newChartTagCmd(out),
+		newChartPushCmd(out),
+		newChartPullCmd(out),
+		newChartSaveCmd(out),
 		newChartListCmd(out),
-		// newChartRemoveCmd(out),
+		newChartRemoveCmd(out),
 	)
 	return cmd
+}
+
+// TODO remove once WARN lines removed from oras or containerd
+func init() {
+	logrus.SetLevel(logrus.ErrorLevel)
 }
