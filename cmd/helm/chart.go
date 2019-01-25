@@ -16,9 +16,10 @@ limitations under the License.
 package main
 
 import (
+	"io"
+
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"io"
 )
 
 const chartHelp = `
