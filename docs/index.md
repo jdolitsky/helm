@@ -10,7 +10,6 @@
 - [Developing Charts](charts.md) - An introduction to chart development
 	- [Chart Lifecycle Hooks](charts_hooks.md)
 	- [Chart Tips and Tricks](charts_tips_and_tricks.md)
-	- [Registries](registries.md)
 	- [Chart Repository Guide](chart_repository.md)
 	- [Syncing your Chart Repository](chart_repository_sync_example.md)
 	- [Signing Charts](provenance.md)
