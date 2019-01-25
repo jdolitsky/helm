@@ -36,11 +36,11 @@ func newChartCmd(out io.Writer) *cobra.Command {
 		Long:  chartHelp,
 	}
 	cmd.AddCommand(
-		newChartPushCmd(out),
-		newChartPullCmd(out),
-		newChartSaveCmd(out),
 		newChartListCmd(out),
+		newChartPullCmd(out),
+		newChartPushCmd(out),
 		newChartRemoveCmd(out),
+		newChartSaveCmd(out),
 	)
 	return cmd
 }

@@ -17,12 +17,13 @@ limitations under the License.
 package main
 
 import (
-	"fmt"
 	"io"
 
 	"github.com/spf13/cobra"
 
+	"k8s.io/helm/cmd/helm/require"
 	"k8s.io/helm/pkg/helm/helmpath"
+	"k8s.io/helm/pkg/registry"
 )
 
 const chartRemoveDesc = `
@@ -30,6 +31,7 @@ TODO
 `
 
 type chartRemoveOptions struct {
+	ref  string
 	home helmpath.Home
 }
 
@@ -37,12 +39,14 @@ func newChartRemoveCmd(out io.Writer) *cobra.Command {
 	o := &chartRemoveOptions{}
 
 	cmd := &cobra.Command{
-		Use:     "remove",
+		Use:     "remove [ref]",
 		Aliases: []string{"rm"},
 		Short:   "remove a chart",
 		Long:    chartRemoveDesc,
+		Args:    require.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			o.home = settings.Home
+			o.ref = args[0]
 			return o.run(out)
 		},
 	}
@@ -51,6 +55,5 @@ func newChartRemoveCmd(out io.Writer) *cobra.Command {
 }
 
 func (o *chartRemoveOptions) run(out io.Writer) error {
-	_, err := fmt.Fprintln(out, "not yet implemented")
-	return err
+	return registry.RemoveChart(out, o.home.Registry(), o.ref)
 }

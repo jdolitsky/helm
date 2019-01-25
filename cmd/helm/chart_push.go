@@ -17,24 +17,13 @@ limitations under the License.
 package main
 
 import (
-	"context"
-	"errors"
-	"fmt"
 	"io"
-	"io/ioutil"
-	"k8s.io/helm/pkg/registry"
-	"os"
-	"path/filepath"
-	"strings"
 
-	"github.com/containerd/containerd/remotes/docker"
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/shizhMSFT/oras/pkg/content"
-	"github.com/shizhMSFT/oras/pkg/oras"
 	"github.com/spf13/cobra"
 
 	"k8s.io/helm/cmd/helm/require"
 	"k8s.io/helm/pkg/helm/helmpath"
+	"k8s.io/helm/pkg/registry"
 )
 
 const chartPushDesc = `
@@ -50,7 +39,7 @@ func newChartPushCmd(out io.Writer) *cobra.Command {
 	o := &chartPushOptions{}
 
 	cmd := &cobra.Command{
-		Use:   "push",
+		Use:   "push [ref]",
 		Short: "push a chart to remote",
 		Long:  chartPushDesc,
 		Args:  require.MinimumNArgs(1),
@@ -65,39 +54,5 @@ func newChartPushCmd(out io.Writer) *cobra.Command {
 }
 
 func (o *chartPushOptions) run(out io.Writer) error {
-	// 1. Create resolver
-	// 2. Make sure o.ref resolves
-	// 3. Attempt push chart to o.ref
-
-	parts := strings.Split(o.ref, ":")
-	if len(parts) < 2 {
-		return errors.New("ref should be in the format name[:tag]")
-	}
-
-	lastIndex := len(parts) - 1
-	refName := strings.Join(parts[0:lastIndex], ":")
-	refTag := parts[lastIndex]
-
-	blobLink := filepath.Join(o.home.Registry(), "refs", refName, refTag)
-	blobPath, err := os.Readlink(blobLink)
-	if err != nil {
-		return err
-	}
-
-	digest := filepath.Base(blobPath)
-
-	fileContent, err := ioutil.ReadFile(blobPath)
-	if err != nil {
-		return err
-	}
-
-	ctx := context.Background()
-	resolver := docker.NewResolver(docker.ResolverOptions{})
-	memoryStore := content.NewMemoryStore()
-
-	desc := memoryStore.Add(digest, registry.HelmChartPackageMediaType, fileContent)
-	pushContents := []ocispec.Descriptor{desc}
-
-	fmt.Fprintf(out, "Pushing %s\nsha256: %s\n", o.ref, digest)
-	return oras.Push(ctx, resolver, o.ref, memoryStore, pushContents)
+	return registry.PushChart(out, o.home.Registry(), o.ref)
 }

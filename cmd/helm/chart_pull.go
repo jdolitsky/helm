@@ -17,22 +17,13 @@ limitations under the License.
 package main
 
 import (
-	"context"
-	"errors"
-	"fmt"
 	"io"
-	"io/ioutil"
-	"k8s.io/helm/cmd/helm/require"
-	"k8s.io/helm/pkg/registry"
-	"os"
-	"path/filepath"
-	"strings"
 
-	"github.com/containerd/containerd/remotes/docker"
-	"github.com/shizhMSFT/oras/pkg/content"
-	"github.com/shizhMSFT/oras/pkg/oras"
 	"github.com/spf13/cobra"
+
+	"k8s.io/helm/cmd/helm/require"
 	"k8s.io/helm/pkg/helm/helmpath"
+	"k8s.io/helm/pkg/registry"
 )
 
 const chartPullDesc = `
@@ -63,61 +54,5 @@ func newChartPullCmd(out io.Writer) *cobra.Command {
 }
 
 func (o *chartPullOptions) run(out io.Writer) error {
-	// 1. Create resolver
-	// 2. Make sure o.ref resolves
-	// 3. Attempt pull chart and validate
-	// 4. save chart into HELM_HOME
-
-	parts := strings.Split(o.ref, ":")
-	if len(parts) < 2 {
-		return errors.New("ref should be in the format name[:tag|@digest]")
-	}
-
-	lastIndex := len(parts) - 1
-	refName := strings.Join(parts[0:lastIndex], ":")
-	refTag := parts[lastIndex]
-
-	destDir := filepath.Join(o.home.Registry(), "blobs", "sha256")
-	os.MkdirAll(destDir, 0755)
-
-	ctx := context.Background()
-	resolver := docker.NewResolver(docker.ResolverOptions{})
-	memoryStore := content.NewMemoryStore()
-
-	fmt.Fprintf(out, "Pulling %s\n", o.ref)
-	allowedMediaTypes := []string{registry.HelmChartPackageMediaType}
-	pullContents, err := oras.Pull(ctx, resolver, o.ref, memoryStore, allowedMediaTypes...)
-	if err != nil {
-		return err
-	}
-
-	os.MkdirAll(destDir, 0755)
-
-	for _, descriptor := range pullContents {
-		digest := descriptor.Digest.Hex()
-		fmt.Fprintf(out, "sha256: %s\n", digest)
-		_, content, ok := memoryStore.Get(descriptor)
-		if !ok {
-			return errors.New("error accessing pulled content")
-		}
-		blobPath := filepath.Join(destDir, digest)
-
-		if _, err := os.Stat(blobPath); err != nil && os.IsNotExist(err) {
-			err := ioutil.WriteFile(blobPath, content, 0644)
-			if err != nil {
-				return err
-			}
-		}
-
-		tagDir := filepath.Join(o.home.Registry(), "refs", refName)
-		os.MkdirAll(tagDir, 0755)
-		tagPath := filepath.Join(tagDir, refTag)
-		os.Remove(tagPath)
-		err = os.Symlink(blobPath, tagPath)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return registry.PullChart(out, o.home.Registry(), o.ref)
 }

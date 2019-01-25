@@ -17,7 +17,6 @@ limitations under the License.
 package main
 
 import (
-	"fmt"
 	"io"
 
 	"github.com/spf13/cobra"
@@ -52,10 +51,5 @@ func newChartListCmd(out io.Writer) *cobra.Command {
 }
 
 func (o *chartListOptions) run(out io.Writer) error {
-	table, err := registry.ListCharts(o.home)
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintln(out, table)
-	return err
+	return registry.ListCharts(out, o.home.Registry())
 }
