@@ -14,26 +14,21 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package action
 
-import (
-	"k8s.io/helm/pkg/action"
+// ChartList performs a chart list operation.
+type ChartList struct {
+	cfg *Configuration
+}
 
-	"github.com/spf13/cobra"
-)
-
-const chartListDesc = `
-TODO
-`
-
-func newChartListCmd(cfg *action.Configuration) *cobra.Command {
-	return &cobra.Command{
-		Use:     "list",
-		Aliases: []string{"ls"},
-		Short:   "list all saved charts",
-		Long:    chartListDesc,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return action.NewChartList(cfg).Run()
-		},
+// NewChartList creates a new ChartList object with the given configuration.
+func NewChartList(cfg *Configuration) *ChartList {
+	return &ChartList{
+		cfg: cfg,
 	}
+}
+
+// Run executes the chart list operation
+func (i *ChartList) Run() error {
+	return i.cfg.RegistryClient.ListCharts()
 }

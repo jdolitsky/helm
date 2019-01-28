@@ -17,7 +17,9 @@ limitations under the License.
 package main // import "k8s.io/helm/cmd/helm"
 
 import (
+	"github.com/containerd/containerd/remotes/docker"
 	"io"
+	"k8s.io/helm/pkg/registry"
 
 	"github.com/spf13/cobra"
 
@@ -61,17 +63,35 @@ func newRootCmd(c helm.Interface, actionConfig *action.Configuration, out io.Wri
 
 	settings.AddFlags(flags)
 
+	flags.Parse(args)
+
+	// set defaults from environment
+	settings.Init(flags)
+
+	// Add the registry client based on settings
+	// TODO: Move this elsewhere (first, settings.Init() must move)
+	resolver := registry.Resolver{
+		Resolver: docker.NewResolver(docker.ResolverOptions{}),
+	}
+	registryClient := registry.Client{
+		CacheRootDir: settings.Home.Registry(),
+		Out:          out,
+		Resolver:     resolver,
+	}
+	actionConfig.RegistryClient = registryClient
+
 	cmd.AddCommand(
 		// chart commands
 		newCreateCmd(out),
 		newDependencyCmd(out),
+		newPullCmd(out),
 		newShowCmd(out),
 		newLintCmd(out),
 		newPackageCmd(out),
 		newRepoCmd(out),
 		newSearchCmd(out),
 		newVerifyCmd(out),
-		newChartCmd(out),
+		newChartCmd(actionConfig),
 
 		// release commands
 		newGetCmd(c, out),
@@ -94,11 +114,6 @@ func newRootCmd(c helm.Interface, actionConfig *action.Configuration, out io.Wri
 		// Hidden documentation generator command: 'helm docs'
 		newDocsCmd(out),
 	)
-
-	flags.Parse(args)
-
-	// set defaults from environment
-	settings.Init(flags)
 
 	// Find and add plugins
 	loadPlugins(cmd, out)

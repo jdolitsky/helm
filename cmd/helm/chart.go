@@ -16,10 +16,10 @@ limitations under the License.
 package main
 
 import (
-	"io"
-
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+
+	"k8s.io/helm/pkg/action"
 )
 
 const chartHelp = `
@@ -30,18 +30,18 @@ Example usage:
     $ helm chart pull [URL]
 `
 
-func newChartCmd(out io.Writer) *cobra.Command {
+func newChartCmd(cfg *action.Configuration) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "chart",
 		Short: "push, pull, tag, or remove Helm charts",
 		Long:  chartHelp,
 	}
 	cmd.AddCommand(
-		newChartListCmd(out),
-		newChartPullCmd(out),
-		newChartPushCmd(out),
-		newChartRemoveCmd(out),
-		newChartSaveCmd(out),
+		newChartListCmd(cfg),
+		newChartPullCmd(cfg),
+		newChartPushCmd(cfg),
+		newChartRemoveCmd(cfg),
+		newChartSaveCmd(cfg),
 	)
 	return cmd
 }

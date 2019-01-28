@@ -17,72 +17,26 @@ limitations under the License.
 package main
 
 import (
-	"io"
-	"path/filepath"
-
-	"github.com/containerd/containerd/remotes/docker"
 	"github.com/spf13/cobra"
 
 	"k8s.io/helm/cmd/helm/require"
-	"k8s.io/helm/pkg/chart/loader"
-	"k8s.io/helm/pkg/helm/helmpath"
-	"k8s.io/helm/pkg/registry"
+	"k8s.io/helm/pkg/action"
 )
 
 const chartSaveDesc = `
 TODO
 `
 
-type chartSaveOptions struct {
-	path string
-	ref  string
-	home helmpath.Home
-}
-
-func newChartSaveCmd(out io.Writer) *cobra.Command {
-	o := &chartSaveOptions{}
-
-	cmd := &cobra.Command{
+func newChartSaveCmd(cfg *action.Configuration) *cobra.Command {
+	return &cobra.Command{
 		Use:   "save [path] [ref]",
 		Short: "save a chart directory",
 		Long:  chartSaveDesc,
 		Args:  require.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			o.home = settings.Home
-			o.path = args[0]
-			o.ref = args[1]
-			return o.run(out)
+			path := args[0]
+			ref := args[1]
+			return action.NewChartSave(cfg).Run(path, ref)
 		},
 	}
-
-	return cmd
-}
-
-func (o *chartSaveOptions) run(out io.Writer) error {
-	resolver := registry.Resolver{
-		Resolver: docker.NewResolver(docker.ResolverOptions{}),
-	}
-
-	registryClient := registry.Client{
-		CacheRootDir: o.home.Registry(),
-		Out:          out,
-		Resolver:     resolver,
-	}
-
-	ref, err := registry.ParseReference(o.ref)
-	if err != nil {
-		return err
-	}
-
-	path, err := filepath.Abs(o.path)
-	if err != nil {
-		return err
-	}
-
-	ch, err := loader.LoadDir(path)
-	if err != nil {
-		return err
-	}
-
-	return registryClient.SaveChart(ch, ref)
 }

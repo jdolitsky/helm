@@ -17,59 +17,26 @@ limitations under the License.
 package main
 
 import (
-	"io"
-
-	"github.com/containerd/containerd/remotes/docker"
 	"github.com/spf13/cobra"
 
 	"k8s.io/helm/cmd/helm/require"
-	"k8s.io/helm/pkg/helm/helmpath"
-	"k8s.io/helm/pkg/registry"
+	"k8s.io/helm/pkg/action"
 )
 
 const chartRemoveDesc = `
 TODO
 `
 
-type chartRemoveOptions struct {
-	ref  string
-	home helmpath.Home
-}
-
-func newChartRemoveCmd(out io.Writer) *cobra.Command {
-	o := &chartRemoveOptions{}
-
-	cmd := &cobra.Command{
+func newChartRemoveCmd(cfg *action.Configuration) *cobra.Command {
+	return &cobra.Command{
 		Use:     "remove [ref]",
 		Aliases: []string{"rm"},
 		Short:   "remove a chart",
 		Long:    chartRemoveDesc,
 		Args:    require.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			o.home = settings.Home
-			o.ref = args[0]
-			return o.run(out)
+			ref := args[0]
+			return action.NewChartRemove(cfg).Run(ref)
 		},
 	}
-
-	return cmd
-}
-
-func (o *chartRemoveOptions) run(out io.Writer) error {
-	resolver := registry.Resolver{
-		Resolver: docker.NewResolver(docker.ResolverOptions{}),
-	}
-
-	registryClient := registry.Client{
-		CacheRootDir: o.home.Registry(),
-		Out:          out,
-		Resolver:     resolver,
-	}
-
-	ref, err := registry.ParseReference(o.ref)
-	if err != nil {
-		return err
-	}
-
-	return registryClient.RemoveChart(ref)
 }

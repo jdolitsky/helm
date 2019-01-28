@@ -17,58 +17,25 @@ limitations under the License.
 package main
 
 import (
-	"io"
-
-	"github.com/containerd/containerd/remotes/docker"
 	"github.com/spf13/cobra"
 
 	"k8s.io/helm/cmd/helm/require"
-	"k8s.io/helm/pkg/helm/helmpath"
-	"k8s.io/helm/pkg/registry"
+	"k8s.io/helm/pkg/action"
 )
 
 const chartPushDesc = `
 TODO
 `
 
-type chartPushOptions struct {
-	ref  string
-	home helmpath.Home
-}
-
-func newChartPushCmd(out io.Writer) *cobra.Command {
-	o := &chartPushOptions{}
-
-	cmd := &cobra.Command{
+func newChartPushCmd(cfg *action.Configuration) *cobra.Command {
+	return &cobra.Command{
 		Use:   "push [ref]",
 		Short: "push a chart to remote",
 		Long:  chartPushDesc,
 		Args:  require.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			o.home = settings.Home
-			o.ref = args[0]
-			return o.run(out)
+			ref := args[0]
+			return action.NewChartPush(cfg).Run(ref)
 		},
 	}
-
-	return cmd
-}
-
-func (o *chartPushOptions) run(out io.Writer) error {
-	resolver := registry.Resolver{
-		Resolver: docker.NewResolver(docker.ResolverOptions{}),
-	}
-
-	registryClient := registry.Client{
-		CacheRootDir: o.home.Registry(),
-		Out:          out,
-		Resolver:     resolver,
-	}
-
-	ref, err := registry.ParseReference(o.ref)
-	if err != nil {
-		return err
-	}
-
-	return registryClient.PushChart(ref)
 }

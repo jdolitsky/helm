@@ -14,26 +14,29 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package action
 
 import (
-	"k8s.io/helm/pkg/action"
-
-	"github.com/spf13/cobra"
+	"k8s.io/helm/pkg/registry"
 )
 
-const chartListDesc = `
-TODO
-`
+// ChartRemove performs a chart remove operation.
+type ChartRemove struct {
+	cfg *Configuration
+}
 
-func newChartListCmd(cfg *action.Configuration) *cobra.Command {
-	return &cobra.Command{
-		Use:     "list",
-		Aliases: []string{"ls"},
-		Short:   "list all saved charts",
-		Long:    chartListDesc,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return action.NewChartList(cfg).Run()
-		},
+// NewChartRemove creates a new ChartRemove object with the given configuration.
+func NewChartRemove(cfg *Configuration) *ChartRemove {
+	return &ChartRemove{
+		cfg: cfg,
 	}
+}
+
+// Run executes the chart remove operation
+func (i *ChartRemove) Run(ref string) error {
+	r, err := registry.ParseReference(ref)
+	if err != nil {
+		return err
+	}
+	return i.cfg.RegistryClient.RemoveChart(r)
 }
