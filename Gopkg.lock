@@ -175,6 +175,17 @@
   version = "v1.1.1"
 
 [[projects]]
+  digest = "1:8285cd51b86f5c3af447ad1db7c8572578a422cf9a50f1f07eea1d021151044f"
+  name = "github.com/deislabs/oras"
+  packages = [
+    "pkg/content",
+    "pkg/oras",
+  ]
+  pruneopts = "UT"
+  revision = "e8a1fa6ff9a507b99eedd45745959e8c5b826d9f"
+  version = "v0.3.3"
+
+[[projects]]
   digest = "1:76dc72490af7174349349838f2fe118996381b31ea83243812a97e5a0fd5ed55"
   name = "github.com/dgrijalva/jwt-go"
   packages = ["."]
@@ -585,17 +596,6 @@
   pruneopts = "UT"
   revision = "05f3235734ad95d0016f6a23902f06461fcf567a"
   version = "v1.5.2"
-
-[[projects]]
-  digest = "1:3722ee02018abf309d2bc7e2a44c05032d514b8bd42ff52fb3e303b1a3ff81ae"
-  name = "github.com/shizhMSFT/oras"
-  packages = [
-    "pkg/content",
-    "pkg/oras",
-  ]
-  pruneopts = "UT"
-  revision = "0e921ccfaf27d6a1c01d86d3407d7d1b93f4f57f"
-  version = "v0.3.1"
 
 [[projects]]
   digest = "1:69b1cc331fca23d702bd72f860c6a647afd0aa9fcbc1d0659b1365e26546dd70"
@@ -1358,7 +1358,11 @@
     "github.com/Masterminds/sprig",
     "github.com/Masterminds/vcs",
     "github.com/asaskevich/govalidator",
+    "github.com/containerd/containerd/reference",
+    "github.com/containerd/containerd/remotes",
     "github.com/containerd/containerd/remotes/docker",
+    "github.com/deislabs/oras/pkg/content",
+    "github.com/deislabs/oras/pkg/oras",
     "github.com/docker/go-units",
     "github.com/evanphx/json-patch",
     "github.com/ghodss/yaml",
@@ -1368,8 +1372,7 @@
     "github.com/mattn/go-shellwords",
     "github.com/opencontainers/image-spec/specs-go/v1",
     "github.com/pkg/errors",
-    "github.com/shizhMSFT/oras/pkg/content",
-    "github.com/shizhMSFT/oras/pkg/oras",
+    "github.com/sirupsen/logrus",
     "github.com/spf13/cobra",
     "github.com/spf13/cobra/doc",
     "github.com/spf13/pflag",
@@ -1379,6 +1382,7 @@
     "golang.org/x/crypto/openpgp/errors",
     "golang.org/x/crypto/openpgp/packet",
     "golang.org/x/crypto/ssh/terminal",
+    "gopkg.in/yaml.v2",
     "k8s.io/api/apps/v1",
     "k8s.io/api/apps/v1beta1",
     "k8s.io/api/apps/v1beta2",

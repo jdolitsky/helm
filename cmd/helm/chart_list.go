@@ -17,9 +17,9 @@ limitations under the License.
 package main
 
 import (
-	"k8s.io/helm/pkg/action"
-
 	"github.com/spf13/cobra"
+
+	"k8s.io/helm/pkg/action"
 )
 
 const chartListDesc = `

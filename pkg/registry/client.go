@@ -28,12 +28,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/deislabs/oras/pkg/content"
+	"github.com/deislabs/oras/pkg/oras"
 	"github.com/docker/go-units"
 	"github.com/gosuri/uitable"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
-	"github.com/shizhMSFT/oras/pkg/content"
-	"github.com/shizhMSFT/oras/pkg/oras"
 
 	"k8s.io/helm/pkg/chartutil"
 	"k8s.io/helm/pkg/provenance"
