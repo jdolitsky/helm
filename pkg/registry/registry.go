@@ -41,14 +41,11 @@ import (
 )
 
 const (
-	// HelmChartNameMediaType is the reserved media type for Helm chart name
-	HelmChartNameMediaType = "application/vnd.cncf.helm.chart.name.v1.txt"
-
-	// HelmChartVersionMediaType is the reserved media type for Helm chart version
-	HelmChartVersionMediaType = "application/vnd.cncf.helm.chart.version.v1.txt"
+	// HelmChartMetaMediaType is the reserved media type for Helm chart metadata
+	HelmChartMetaMediaType = "application/vnd.cncf.helm.chart.meta.v1+json"
 
 	// HelmChartPackageMediaType is the reserved media type for Helm chart package content
-	HelmChartPackageMediaType = "application/vnd.cncf.helm.chart.content.v1.tar"
+	HelmChartContentMediaType = "application/vnd.cncf.helm.chart.content.v1+tar"
 )
 
 // ListCharts lists locally stored charts
@@ -110,7 +107,7 @@ func PullChart(out io.Writer, storageRootDir string, ref string) error {
 	memoryStore := content.NewMemoryStore()
 
 	fmt.Fprintf(out, "Pulling %s\n", ref)
-	allowedMediaTypes := []string{HelmChartPackageMediaType}
+	allowedMediaTypes := []string{HelmChartContentMediaType}
 	pullContents, err := oras.Pull(ctx, resolver, ref, memoryStore, allowedMediaTypes...)
 	if err != nil {
 		return err
@@ -170,7 +167,7 @@ func PushChart(out io.Writer, storageRootDir string, ref string) error {
 	resolver := docker.NewResolver(docker.ResolverOptions{})
 	memoryStore := content.NewMemoryStore()
 
-	desc := memoryStore.Add(digest, HelmChartPackageMediaType, fileContent)
+	desc := memoryStore.Add(digest, HelmChartContentMediaType, fileContent)
 	pushContents := []ocispec.Descriptor{desc}
 
 	fmt.Fprintf(out, "Pushing %s\nsha256: %s\n", ref, digest)
