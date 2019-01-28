@@ -60,9 +60,9 @@ func (o *chartPullOptions) run(out io.Writer) error {
 	}
 
 	registryClient := registry.Client{
-		Resolver:       resolver,
-		StorageRootDir: o.home.Registry(),
-		Writer:         out,
+		CacheRootDir: o.home.Registry(),
+		Out:          out,
+		Resolver:     resolver,
 	}
 
 	ref, err := registry.ParseReference(o.ref)

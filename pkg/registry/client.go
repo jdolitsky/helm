@@ -47,19 +47,20 @@ const (
 	HelmChartContentMediaType = "application/vnd.cncf.helm.chart.content.v1+tar"
 )
 
-var (
-	allowedMediaTypes = []string{
+// KnownMediaTypes returns a list of layer mediaTypes that the Helm client knows about
+func KnownMediaTypes() []string {
+	return []string{
 		HelmChartMetaMediaType,
 		HelmChartContentMediaType,
 	}
-)
+}
 
 type (
 	// Client works with OCI-compliant registries and local Helm chart cache
 	Client struct {
-		Resolver       Resolver
-		StorageRootDir string
-		Writer         io.Writer
+		CacheRootDir string
+		Out          io.Writer
+		Resolver     Resolver
 	}
 )
 
@@ -70,7 +71,7 @@ func (c *Client) ListCharts() error {
 	table.AddRow("REF", "NAME", "VERSION", "DIGEST", "SIZE", "CREATED")
 
 	// Walk the storage dir, check for symlinks under "refs" dir pointing to valid files in "blobs/sha256"
-	refsDir := filepath.Join(c.StorageRootDir, "refs")
+	refsDir := filepath.Join(c.CacheRootDir, "refs")
 	os.MkdirAll(refsDir, 0755)
 	err := filepath.Walk(refsDir, func(path string, fileInfo os.FileInfo, fileError error) error {
 
@@ -86,13 +87,13 @@ func (c *Client) ListCharts() error {
 				if digest := filepath.Base(blobPath); len(digest) == 64 {
 
 					// Make sure this file is in a valid location
-					if blobPath == filepath.Join(c.StorageRootDir, "blobs", "sha256", digest) {
-						ref := strings.TrimLeft(strings.TrimPrefix(repo, filepath.Join(c.StorageRootDir, "refs")), "/\\")
+					if blobPath == filepath.Join(c.CacheRootDir, "blobs", "sha256", digest) {
+						ref := strings.TrimLeft(strings.TrimPrefix(repo, filepath.Join(c.CacheRootDir, "refs")), "/\\")
 						ref = fmt.Sprintf("%s:%s", ref, tag)
 						name := filepath.Base(repo)
 						created := units.HumanDuration(time.Now().UTC().Sub(blobFileInfo.ModTime()))
 						size := byteCountBinary(blobFileInfo.Size())
-						table.AddRow(ref, name, tag, digest[:12], size, created)
+						table.AddRow(ref, name, tag, digest[:7], size, created)
 					}
 				}
 			}
@@ -104,26 +105,26 @@ func (c *Client) ListCharts() error {
 		return err
 	}
 
-	_, err = fmt.Fprintln(c.Writer, table.String())
+	_, err = fmt.Fprintln(c.Out, table.String())
 	return err
 }
 
 // PullChart downloads a chart from a registry
 func (c *Client) PullChart(ref *Reference) error {
-	destDir := filepath.Join(c.StorageRootDir, "blobs", "sha256")
+	destDir := filepath.Join(c.CacheRootDir, "blobs", "sha256")
 	os.MkdirAll(destDir, 0755)
 	ctx := context.Background()
 	memoryStore := content.NewMemoryStore()
 
-	fmt.Fprintf(c.Writer, "Pulling %s\n", ref.String())
-	pullContents, err := oras.Pull(ctx, c.Resolver, ref.String(), memoryStore, allowedMediaTypes...)
+	fmt.Fprintf(c.Out, "Pulling %s\n", ref.String())
+	pullContents, err := oras.Pull(ctx, c.Resolver, ref.String(), memoryStore, KnownMediaTypes()...)
 	if err != nil {
 		return err
 	}
 
 	for _, descriptor := range pullContents {
 		digest := descriptor.Digest.Hex()
-		fmt.Fprintf(c.Writer, "sha256: %s\n", digest)
+		fmt.Fprintf(c.Out, "sha256: %s\n", digest)
 		_, content, ok := memoryStore.Get(descriptor)
 		if !ok {
 			return errors.New("error accessing pulled content")
@@ -137,7 +138,7 @@ func (c *Client) PullChart(ref *Reference) error {
 			}
 		}
 
-		tagDir := filepath.Join(c.StorageRootDir, "refs", ref.Locator)
+		tagDir := filepath.Join(c.CacheRootDir, "refs", ref.Locator)
 		os.MkdirAll(tagDir, 0755)
 		tagPath := filepath.Join(tagDir, ref.Object)
 		os.Remove(tagPath)
@@ -152,7 +153,7 @@ func (c *Client) PullChart(ref *Reference) error {
 
 // PushChart uploads a chart to a registry
 func (c *Client) PushChart(ref *Reference) error {
-	blobLink := filepath.Join(c.StorageRootDir, "refs", ref.Locator, ref.Object)
+	blobLink := filepath.Join(c.CacheRootDir, "refs", ref.Locator, ref.Object)
 	blobPath, err := os.Readlink(blobLink)
 	if err != nil {
 		return err
@@ -171,20 +172,20 @@ func (c *Client) PushChart(ref *Reference) error {
 	desc := memoryStore.Add(digest, HelmChartContentMediaType, fileContent)
 	pushContents := []ocispec.Descriptor{desc}
 
-	fmt.Fprintf(c.Writer, "Pushing %s\nsha256: %s\n", ref, digest)
+	fmt.Fprintf(c.Out, "Pushing %s\nsha256: %s\n", ref, digest)
 	return oras.Push(ctx, c.Resolver, ref.String(), memoryStore, pushContents)
 }
 
 // RemoveChart deletes a locally saved chart
 func (c *Client) RemoveChart(ref *Reference) error {
-	blobLink := filepath.Join(c.StorageRootDir, "refs", ref.Locator, ref.Object)
-	fmt.Fprintf(c.Writer, "Deleting %s\n", ref.String())
+	blobLink := filepath.Join(c.CacheRootDir, "refs", ref.Locator, ref.Object)
+	fmt.Fprintf(c.Out, "Deleting %s\n", ref.String())
 	return os.Remove(blobLink)
 }
 
 // SaveChart stores a copy of chart in local cache
 func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
-	destDir := filepath.Join(c.StorageRootDir, "blobs", "sha256")
+	destDir := filepath.Join(c.CacheRootDir, "blobs", "sha256")
 	os.MkdirAll(destDir, 0755)
 	tmpFile, err := chartutil.Save(ch, destDir)
 	if err != nil {
@@ -212,7 +213,7 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 		os.Remove(tmpFile)
 	}
 
-	blobLinkParentDir := filepath.Join(c.StorageRootDir, "refs", ref.Locator)
+	blobLinkParentDir := filepath.Join(c.CacheRootDir, "refs", ref.Locator)
 	os.MkdirAll(blobLinkParentDir, 0755)
 	blobLink := filepath.Join(blobLinkParentDir, ref.Object)
 	os.Remove(blobLink)
@@ -221,7 +222,7 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 		return err
 	}
 
-	fmt.Fprintf(c.Writer, "repo: %s\ntag: %s\ndigest: %s\n", ref.Locator, ref.Object, digest)
+	fmt.Fprintf(c.Out, "repo: %s\ntag: %s\ndigest: %s\n", ref.Locator, ref.Object, digest)
 	return nil
 }
 

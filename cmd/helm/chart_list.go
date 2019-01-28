@@ -57,9 +57,9 @@ func (o *chartListOptions) run(out io.Writer) error {
 	}
 
 	registryClient := registry.Client{
-		Resolver:       resolver,
-		StorageRootDir: o.home.Registry(),
-		Writer:         out,
+		CacheRootDir: o.home.Registry(),
+		Out:          out,
+		Resolver:     resolver,
 	}
 
 	return registryClient.ListCharts()
