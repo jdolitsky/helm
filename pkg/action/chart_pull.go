@@ -33,10 +33,10 @@ func NewChartPull(cfg *Configuration) *ChartPull {
 }
 
 // Run executes the chart pull operation
-func (i *ChartPull) Run(ref string) error {
+func (a *ChartPull) Run(ref string) error {
 	r, err := registry.ParseReference(ref)
 	if err != nil {
 		return err
 	}
-	return i.cfg.RegistryClient.PullChart(r)
+	return a.cfg.RegistryClient.PullChart(r)
 }

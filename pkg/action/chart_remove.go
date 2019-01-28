@@ -33,10 +33,10 @@ func NewChartRemove(cfg *Configuration) *ChartRemove {
 }
 
 // Run executes the chart remove operation
-func (i *ChartRemove) Run(ref string) error {
+func (a *ChartRemove) Run(ref string) error {
 	r, err := registry.ParseReference(ref)
 	if err != nil {
 		return err
 	}
-	return i.cfg.RegistryClient.RemoveChart(r)
+	return a.cfg.RegistryClient.RemoveChart(r)
 }

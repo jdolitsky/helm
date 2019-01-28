@@ -29,6 +29,6 @@ func NewChartList(cfg *Configuration) *ChartList {
 }
 
 // Run executes the chart list operation
-func (i *ChartList) Run() error {
-	return i.cfg.RegistryClient.ListCharts()
+func (a *ChartList) Run() error {
+	return a.cfg.RegistryClient.ListCharts()
 }

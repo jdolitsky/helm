@@ -36,7 +36,7 @@ func NewChartSave(cfg *Configuration) *ChartSave {
 }
 
 // Run executes the chart save operation
-func (i *ChartSave) Run(path string, ref string) error {
+func (a *ChartSave) Run(path string, ref string) error {
 	path, err := filepath.Abs(path)
 	if err != nil {
 		return err
@@ -52,5 +52,5 @@ func (i *ChartSave) Run(path string, ref string) error {
 		return err
 	}
 
-	return i.cfg.RegistryClient.SaveChart(ch, r)
+	return a.cfg.RegistryClient.SaveChart(ch, r)
 }
