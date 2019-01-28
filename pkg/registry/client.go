@@ -22,12 +22,12 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"k8s.io/helm/pkg/chart"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/containerd/containerd/remotes/docker"
 	"github.com/docker/go-units"
 	"github.com/gosuri/uitable"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -35,7 +35,6 @@ import (
 	"github.com/shizhMSFT/oras/pkg/content"
 	"github.com/shizhMSFT/oras/pkg/oras"
 
-	"k8s.io/helm/pkg/chart/loader"
 	"k8s.io/helm/pkg/chartutil"
 	"k8s.io/helm/pkg/provenance"
 )
@@ -48,14 +47,30 @@ const (
 	HelmChartContentMediaType = "application/vnd.cncf.helm.chart.content.v1+tar"
 )
 
+var (
+	allowedMediaTypes = []string{
+		HelmChartMetaMediaType,
+		HelmChartContentMediaType,
+	}
+)
+
+type (
+	// Client works with OCI-compliant registries and local Helm chart cache
+	Client struct {
+		Resolver       Resolver
+		StorageRootDir string
+		Writer         io.Writer
+	}
+)
+
 // ListCharts lists locally stored charts
-func ListCharts(out io.Writer, storageRootDir string) error {
+func (c *Client) ListCharts() error {
 	table := uitable.New()
 	table.MaxColWidth = 60
 	table.AddRow("REF", "NAME", "VERSION", "DIGEST", "SIZE", "CREATED")
 
 	// Walk the storage dir, check for symlinks under "refs" dir pointing to valid files in "blobs/sha256"
-	refsDir := filepath.Join(storageRootDir, "refs")
+	refsDir := filepath.Join(c.StorageRootDir, "refs")
 	os.MkdirAll(refsDir, 0755)
 	err := filepath.Walk(refsDir, func(path string, fileInfo os.FileInfo, fileError error) error {
 
@@ -67,12 +82,12 @@ func ListCharts(out io.Writer, storageRootDir string) error {
 				tag := filepath.Base(path)
 				repo := strings.TrimRight(strings.TrimSuffix(path, tag), "/\\")
 
-				// Make sure the filename looks like a sha256 digest (64 chars
+				// Make sure the filename looks like a sha256 digest (64 chars)
 				if digest := filepath.Base(blobPath); len(digest) == 64 {
 
 					// Make sure this file is in a valid location
-					if blobPath == filepath.Join(storageRootDir, "blobs", "sha256", digest) {
-						ref := strings.TrimLeft(strings.TrimPrefix(repo, filepath.Join(storageRootDir, "refs")), "/\\")
+					if blobPath == filepath.Join(c.StorageRootDir, "blobs", "sha256", digest) {
+						ref := strings.TrimLeft(strings.TrimPrefix(repo, filepath.Join(c.StorageRootDir, "refs")), "/\\")
 						ref = fmt.Sprintf("%s:%s", ref, tag)
 						name := filepath.Base(repo)
 						created := units.HumanDuration(time.Now().UTC().Sub(blobFileInfo.ModTime()))
@@ -89,40 +104,31 @@ func ListCharts(out io.Writer, storageRootDir string) error {
 		return err
 	}
 
-	_, err = fmt.Fprintln(out, table.String())
+	_, err = fmt.Fprintln(c.Writer, table.String())
 	return err
 }
 
 // PullChart downloads a chart from a registry
-func PullChart(out io.Writer, storageRootDir string, ref string) error {
-	if err := validateRef(ref); err != nil {
-		return err
-	}
-
-	destDir := filepath.Join(storageRootDir, "blobs", "sha256")
+func (c *Client) PullChart(ref *Reference) error {
+	destDir := filepath.Join(c.StorageRootDir, "blobs", "sha256")
 	os.MkdirAll(destDir, 0755)
-
 	ctx := context.Background()
-	resolver := docker.NewResolver(docker.ResolverOptions{})
 	memoryStore := content.NewMemoryStore()
 
-	fmt.Fprintf(out, "Pulling %s\n", ref)
-	allowedMediaTypes := []string{HelmChartContentMediaType}
-	pullContents, err := oras.Pull(ctx, resolver, ref, memoryStore, allowedMediaTypes...)
+	fmt.Fprintf(c.Writer, "Pulling %s\n", ref.String())
+	pullContents, err := oras.Pull(ctx, c.Resolver, ref.String(), memoryStore, allowedMediaTypes...)
 	if err != nil {
 		return err
 	}
 
-	os.MkdirAll(destDir, 0755)
-	name, tag := getRefParts(ref)
-
 	for _, descriptor := range pullContents {
 		digest := descriptor.Digest.Hex()
-		fmt.Fprintf(out, "sha256: %s\n", digest)
+		fmt.Fprintf(c.Writer, "sha256: %s\n", digest)
 		_, content, ok := memoryStore.Get(descriptor)
 		if !ok {
 			return errors.New("error accessing pulled content")
 		}
+
 		blobPath := filepath.Join(destDir, digest)
 		if _, err := os.Stat(blobPath); err != nil && os.IsNotExist(err) {
 			err := ioutil.WriteFile(blobPath, content, 0644)
@@ -130,9 +136,10 @@ func PullChart(out io.Writer, storageRootDir string, ref string) error {
 				return err
 			}
 		}
-		tagDir := filepath.Join(storageRootDir, "refs", name)
+
+		tagDir := filepath.Join(c.StorageRootDir, "refs", ref.Locator)
 		os.MkdirAll(tagDir, 0755)
-		tagPath := filepath.Join(tagDir, tag)
+		tagPath := filepath.Join(tagDir, ref.Object)
 		os.Remove(tagPath)
 		err = os.Symlink(blobPath, tagPath)
 		if err != nil {
@@ -144,13 +151,8 @@ func PullChart(out io.Writer, storageRootDir string, ref string) error {
 }
 
 // PushChart uploads a chart to a registry
-func PushChart(out io.Writer, storageRootDir string, ref string) error {
-	if err := validateRef(ref); err != nil {
-		return err
-	}
-
-	name, tag := getRefParts(ref)
-	blobLink := filepath.Join(storageRootDir, "refs", name, tag)
+func (c *Client) PushChart(ref *Reference) error {
+	blobLink := filepath.Join(c.StorageRootDir, "refs", ref.Locator, ref.Object)
 	blobPath, err := os.Readlink(blobLink)
 	if err != nil {
 		return err
@@ -164,46 +166,25 @@ func PushChart(out io.Writer, storageRootDir string, ref string) error {
 	}
 
 	ctx := context.Background()
-	resolver := docker.NewResolver(docker.ResolverOptions{})
 	memoryStore := content.NewMemoryStore()
 
 	desc := memoryStore.Add(digest, HelmChartContentMediaType, fileContent)
 	pushContents := []ocispec.Descriptor{desc}
 
-	fmt.Fprintf(out, "Pushing %s\nsha256: %s\n", ref, digest)
-	return oras.Push(ctx, resolver, ref, memoryStore, pushContents)
+	fmt.Fprintf(c.Writer, "Pushing %s\nsha256: %s\n", ref, digest)
+	return oras.Push(ctx, c.Resolver, ref.String(), memoryStore, pushContents)
 }
 
 // RemoveChart deletes a locally saved chart
-func RemoveChart(out io.Writer, storageRootDir string, ref string) error {
-	if err := validateRef(ref); err != nil {
-		return err
-	}
-
-	name, tag := getRefParts(ref)
-	blobLink := filepath.Join(storageRootDir, "refs", name, tag)
-
-	fmt.Fprintf(out, "Deleting %s\n", ref)
+func (c *Client) RemoveChart(ref *Reference) error {
+	blobLink := filepath.Join(c.StorageRootDir, "refs", ref.Locator, ref.Object)
+	fmt.Fprintf(c.Writer, "Deleting %s\n", ref.String())
 	return os.Remove(blobLink)
 }
 
-// SaveChart packages a chart directory and stores a copy locally
-func SaveChart(out io.Writer, storageRootDir string, path string, ref string) error {
-	if err := validateRef(ref); err != nil {
-		return err
-	}
-
-	path, err := filepath.Abs(path)
-	if err != nil {
-		return err
-	}
-
-	ch, err := loader.LoadDir(path)
-	if err != nil {
-		return err
-	}
-
-	destDir := filepath.Join(storageRootDir, "blobs", "sha256")
+// SaveChart stores a copy of chart in local cache
+func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
+	destDir := filepath.Join(c.StorageRootDir, "blobs", "sha256")
 	os.MkdirAll(destDir, 0755)
 	tmpFile, err := chartutil.Save(ch, destDir)
 	if err != nil {
@@ -231,20 +212,20 @@ func SaveChart(out io.Writer, storageRootDir string, path string, ref string) er
 		os.Remove(tmpFile)
 	}
 
-	name, tag := getRefParts(ref)
-	blobLinkParentDir := filepath.Join(storageRootDir, "refs", name)
+	blobLinkParentDir := filepath.Join(c.StorageRootDir, "refs", ref.Locator)
 	os.MkdirAll(blobLinkParentDir, 0755)
-	blobLink := filepath.Join(blobLinkParentDir, tag)
+	blobLink := filepath.Join(blobLinkParentDir, ref.Object)
 	os.Remove(blobLink)
 	err = os.Symlink(blobPath, blobLink)
 	if err != nil {
 		return err
 	}
 
-	fmt.Fprintf(out, "repo: %s\ntag: %s\ndigest: %s\n", name, tag, digest)
+	fmt.Fprintf(c.Writer, "repo: %s\ntag: %s\ndigest: %s\n", ref.Locator, ref.Object, digest)
 	return nil
 }
 
+// byteCountBinary produces a human-readable file size
 func byteCountBinary(b int64) string {
 	const unit = 1024
 	if b < unit {
@@ -256,21 +237,4 @@ func byteCountBinary(b int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
-}
-
-func validateRef(ref string) error {
-	// TODO validate this more!
-	parts := strings.Split(ref, ":")
-	if len(parts) < 2 {
-		return errors.New("ref should be in the format name[:tag]")
-	}
-	return nil
-}
-
-func getRefParts(ref string) (string, string) {
-	parts := strings.Split(ref, ":")
-	lastIndex := len(parts) - 1
-	refName := strings.Join(parts[0:lastIndex], ":")
-	refTag := parts[lastIndex]
-	return refName, refTag
 }

@@ -19,6 +19,7 @@ package main
 import (
 	"io"
 
+	"github.com/containerd/containerd/remotes/docker"
 	"github.com/spf13/cobra"
 
 	"k8s.io/helm/cmd/helm/require"
@@ -55,5 +56,20 @@ func newChartRemoveCmd(out io.Writer) *cobra.Command {
 }
 
 func (o *chartRemoveOptions) run(out io.Writer) error {
-	return registry.RemoveChart(out, o.home.Registry(), o.ref)
+	resolver := registry.Resolver{
+		Resolver: docker.NewResolver(docker.ResolverOptions{}),
+	}
+
+	registryClient := registry.Client{
+		Resolver:       resolver,
+		StorageRootDir: o.home.Registry(),
+		Writer:         out,
+	}
+
+	ref, err := registry.ParseReference(o.ref)
+	if err != nil {
+		return err
+	}
+
+	return registryClient.RemoveChart(ref)
 }

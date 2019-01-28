@@ -18,10 +18,13 @@ package main
 
 import (
 	"io"
+	"path/filepath"
 
+	"github.com/containerd/containerd/remotes/docker"
 	"github.com/spf13/cobra"
 
 	"k8s.io/helm/cmd/helm/require"
+	"k8s.io/helm/pkg/chart/loader"
 	"k8s.io/helm/pkg/helm/helmpath"
 	"k8s.io/helm/pkg/registry"
 )
@@ -56,5 +59,30 @@ func newChartSaveCmd(out io.Writer) *cobra.Command {
 }
 
 func (o *chartSaveOptions) run(out io.Writer) error {
-	return registry.SaveChart(out, o.home.Registry(), o.path, o.ref)
+	resolver := registry.Resolver{
+		Resolver: docker.NewResolver(docker.ResolverOptions{}),
+	}
+
+	registryClient := registry.Client{
+		Resolver:       resolver,
+		StorageRootDir: o.home.Registry(),
+		Writer:         out,
+	}
+
+	ref, err := registry.ParseReference(o.ref)
+	if err != nil {
+		return err
+	}
+
+	path, err := filepath.Abs(o.path)
+	if err != nil {
+		return err
+	}
+
+	ch, err := loader.LoadDir(path)
+	if err != nil {
+		return err
+	}
+
+	return registryClient.SaveChart(ch, ref)
 }

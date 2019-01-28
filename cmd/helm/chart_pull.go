@@ -19,6 +19,7 @@ package main
 import (
 	"io"
 
+	"github.com/containerd/containerd/remotes/docker"
 	"github.com/spf13/cobra"
 
 	"k8s.io/helm/cmd/helm/require"
@@ -54,5 +55,20 @@ func newChartPullCmd(out io.Writer) *cobra.Command {
 }
 
 func (o *chartPullOptions) run(out io.Writer) error {
-	return registry.PullChart(out, o.home.Registry(), o.ref)
+	resolver := registry.Resolver{
+		Resolver: docker.NewResolver(docker.ResolverOptions{}),
+	}
+
+	registryClient := registry.Client{
+		Resolver:       resolver,
+		StorageRootDir: o.home.Registry(),
+		Writer:         out,
+	}
+
+	ref, err := registry.ParseReference(o.ref)
+	if err != nil {
+		return err
+	}
+
+	return registryClient.PullChart(ref)
 }

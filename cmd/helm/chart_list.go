@@ -19,6 +19,7 @@ package main
 import (
 	"io"
 
+	"github.com/containerd/containerd/remotes/docker"
 	"github.com/spf13/cobra"
 
 	"k8s.io/helm/pkg/helm/helmpath"
@@ -51,5 +52,15 @@ func newChartListCmd(out io.Writer) *cobra.Command {
 }
 
 func (o *chartListOptions) run(out io.Writer) error {
-	return registry.ListCharts(out, o.home.Registry())
+	resolver := registry.Resolver{
+		Resolver: docker.NewResolver(docker.ResolverOptions{}),
+	}
+
+	registryClient := registry.Client{
+		Resolver:       resolver,
+		StorageRootDir: o.home.Registry(),
+		Writer:         out,
+	}
+
+	return registryClient.ListCharts()
 }
