@@ -51,6 +51,12 @@ const (
 
 	// HelmChartContentFileName is the reserved file name for Helm chart package content
 	HelmChartContentFileName = "chart-content.tgz"
+
+	// HelmChartNameAnnotation is the reserved annotation key for Helm chart name
+	HelmChartNameAnnotation = "chart.name"
+
+	// HelmChartVersionAnnotation is the reserved annotation key for Helm chart version
+	HelmChartVersionAnnotation = "chart.version"
 )
 
 // KnownMediaTypes returns a list of layer mediaTypes that the Helm client knows about
@@ -222,8 +228,10 @@ func (c *Client) PushChart(ref *Reference) error {
 	if err != nil {
 		return err
 	}
-	contentLayer.Annotations["chart.name"] = filepath.Base(filepath.Dir(filepath.Dir(chartPath)))
-	contentLayer.Annotations["chart.version"] = filepath.Base(chartPath)
+	chartName := filepath.Base(filepath.Dir(filepath.Dir(chartPath)))
+	chartVersion := filepath.Base(chartPath)
+	contentLayer.Annotations[HelmChartNameAnnotation] = chartName
+	contentLayer.Annotations[HelmChartVersionAnnotation] = chartVersion
 
 	// do push
 	layers := []ocispec.Descriptor{metaLayer, contentLayer}
