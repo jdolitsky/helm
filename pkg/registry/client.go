@@ -20,6 +20,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/deislabs/oras/pkg/content"
+	"github.com/deislabs/oras/pkg/oras"
+	"github.com/docker/go-units"
+	"github.com/gosuri/uitable"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/pkg/errors"
 	"io"
 	"io/ioutil"
 	"k8s.io/helm/pkg/chart"
@@ -28,12 +34,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/deislabs/oras/pkg/content"
-	"github.com/deislabs/oras/pkg/oras"
-	"github.com/docker/go-units"
-	"github.com/gosuri/uitable"
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/pkg/errors"
+	//"strings"
 
 	"k8s.io/helm/pkg/chartutil"
 	"k8s.io/helm/pkg/provenance"
@@ -71,38 +72,67 @@ func (c *Client) ListCharts() error {
 	table.AddRow("REF", "NAME", "VERSION", "DIGEST", "SIZE", "CREATED")
 
 	// Walk the storage dir, check for symlinks under "refs" dir pointing to valid files in "blobs/sha256"
+	refs := map[string]map[string]string{}
 	refsDir := filepath.Join(c.CacheRootDir, "refs")
 	os.MkdirAll(refsDir, 0755)
 	err := filepath.Walk(refsDir, func(path string, fileInfo os.FileInfo, fileError error) error {
 
-		// Check if this file is a symlink (tag)
-		blobPath, err := os.Readlink(path)
+		// Check if this file is a symlink
+		linkPath, err := os.Readlink(path)
 		if err == nil {
-			blobFileInfo, err := os.Stat(blobPath)
+			destFileInfo, err := os.Stat(linkPath)
 			if err == nil {
-				tag := filepath.Base(path)
-				repo := strings.TrimRight(strings.TrimSuffix(path, tag), "/\\")
+				tagDir := filepath.Dir(path)
 
-				// Make sure the filename looks like a sha256 digest (64 chars)
-				if digest := filepath.Base(blobPath); len(digest) == 64 {
+				// Determine the ref
+				ref := fmt.Sprintf("%s:%s", strings.TrimLeft(
+					strings.TrimPrefix(filepath.Dir(filepath.Dir(tagDir)), refsDir), "/\\"),
+					filepath.Base(tagDir))
 
-					// Make sure this file is in a valid location
-					if blobPath == filepath.Join(c.CacheRootDir, "blobs", "sha256", digest) {
-						ref := strings.TrimLeft(strings.TrimPrefix(repo, filepath.Join(c.CacheRootDir, "refs")), "/\\")
-						ref = fmt.Sprintf("%s:%s", ref, tag)
-						name := filepath.Base(repo)
-						created := units.HumanDuration(time.Now().UTC().Sub(blobFileInfo.ModTime()))
-						size := byteCountBinary(blobFileInfo.Size())
-						table.AddRow(ref, name, tag, digest[:7], size, created)
+				// Init hashmap entry if does not exist
+				if _, ok := refs[ref]; !ok {
+					refs[ref] = map[string]string{}
+				}
+
+				// Add data to entry based on file name (symlink name)
+				base := filepath.Base(path)
+				switch base {
+				case "chart":
+					refs[ref]["name"] = filepath.Base(filepath.Dir(filepath.Dir(linkPath)))
+					refs[ref]["version"] = destFileInfo.Name()
+				case "content":
+					shaPrefix := filepath.Base(filepath.Dir(linkPath))
+					digest := fmt.Sprintf("%s%s", shaPrefix, destFileInfo.Name())
+
+					// Make sure the filename looks like a sha256 digest (64 chars)
+					if len(digest) == 64 {
+						refs[ref]["digest"] = digest[:7]
+						refs[ref]["size"] = byteCountBinary(destFileInfo.Size())
+						refs[ref]["created"] = units.HumanDuration(time.Now().UTC().Sub(destFileInfo.ModTime()))
 					}
 				}
 			}
 		}
+
 		return nil
 	})
 
 	if err != nil {
 		return err
+	}
+
+	for ref, d := range refs {
+		allKeysFound := true
+		for _, v := range []string{"name", "version", "digest", "size", "created"} {
+			if _, ok := d[v]; !ok {
+				allKeysFound = false
+				break
+			}
+		}
+		if !allKeysFound {
+			continue
+		}
+		table.AddRow(ref, d["name"], d["version"], d["digest"], d["size"], d["created"])
 	}
 
 	_, err = fmt.Fprintln(c.Out, table.String())
