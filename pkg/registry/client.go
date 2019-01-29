@@ -45,6 +45,12 @@ const (
 
 	// HelmChartPackageMediaType is the reserved media type for Helm chart package content
 	HelmChartContentMediaType = "application/vnd.cncf.helm.chart.content.v1+tar"
+
+	// HelmChartMetaFileName is the reserved file name for Helm chart metadata
+	HelmChartMetaFileName = "chart-meta.json"
+
+	// HelmChartContentFileName is the reserved file name for Helm chart package content
+	HelmChartContentFileName = "chart-content.tgz"
 )
 
 // KnownMediaTypes returns a list of layer mediaTypes that the Helm client knows about
@@ -182,34 +188,54 @@ func (c *Client) PullChart(ref *Reference) error {
 
 // PushChart uploads a chart to a registry
 func (c *Client) PushChart(ref *Reference) error {
-	blobLink := filepath.Join(c.CacheRootDir, "refs", ref.Locator, ref.Object)
-	blobPath, err := os.Readlink(blobLink)
-	if err != nil {
-		return err
-	}
-
-	digest := filepath.Base(blobPath)
-
-	fileContent, err := ioutil.ReadFile(blobPath)
-	if err != nil {
-		return err
-	}
-
 	ctx := context.Background()
 	memoryStore := content.NewMemoryStore()
+	tagDir := filepath.Join(c.CacheRootDir, "refs", ref.Locator, "tags", ref.Object)
 
-	desc := memoryStore.Add(digest, HelmChartContentMediaType, fileContent)
-	pushContents := []ocispec.Descriptor{desc}
+	// create meta layer
+	metaLink := filepath.Join(tagDir, "meta")
+	metaPath, err := os.Readlink(metaLink)
+	if err != nil {
+		return err
+	}
+	metaContent, err := ioutil.ReadFile(metaPath)
+	if err != nil {
+		return err
+	}
+	metaLayer := memoryStore.Add(HelmChartMetaFileName, HelmChartMetaMediaType, metaContent)
 
-	fmt.Fprintf(c.Out, "Pushing %s\nsha256: %s\n", ref, digest)
-	return oras.Push(ctx, c.Resolver, ref.String(), memoryStore, pushContents)
+	// create content layer
+	contentLink := filepath.Join(tagDir, "content")
+	contentPath, err := os.Readlink(contentLink)
+	if err != nil {
+		return err
+	}
+	chartContent, err := ioutil.ReadFile(contentPath)
+	if err != nil {
+		return err
+	}
+	contentLayer := memoryStore.Add(HelmChartContentFileName, HelmChartContentMediaType, chartContent)
+
+	// add chart name and version as annotations
+	chartLink := filepath.Join(tagDir, "chart")
+	chartPath, err := os.Readlink(chartLink)
+	if err != nil {
+		return err
+	}
+	contentLayer.Annotations["chart.name"] = filepath.Base(filepath.Dir(filepath.Dir(chartPath)))
+	contentLayer.Annotations["chart.version"] = filepath.Base(chartPath)
+
+	// do push
+	layers := []ocispec.Descriptor{metaLayer, contentLayer}
+	fmt.Fprintf(c.Out, "Pushing %s\nsha256: %s\n", ref, contentLayer.Digest)
+	return oras.Push(ctx, c.Resolver, ref.String(), memoryStore, layers)
 }
 
 // RemoveChart deletes a locally saved chart
 func (c *Client) RemoveChart(ref *Reference) error {
-	blobLink := filepath.Join(c.CacheRootDir, "refs", ref.Locator, ref.Object)
+	tagDir := filepath.Join(c.CacheRootDir, "refs", ref.Locator, "tags", ref.Object)
 	fmt.Fprintf(c.Out, "Deleting %s\n", ref.String())
-	return os.Remove(blobLink)
+	return os.RemoveAll(tagDir)
 }
 
 // SaveChart stores a copy of chart in local cache
