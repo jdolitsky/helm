@@ -76,80 +76,6 @@ type (
 	}
 )
 
-// ListCharts lists locally stored charts
-func (c *Client) ListCharts() error {
-	table := uitable.New()
-	table.MaxColWidth = 60
-	table.AddRow("REF", "NAME", "VERSION", "DIGEST", "SIZE", "CREATED")
-
-	// Walk the storage dir, check for symlinks under "refs" dir pointing to valid files in "blobs/"
-	refs := map[string]map[string]string{}
-	refsDir := filepath.Join(c.CacheRootDir, "refs")
-	os.MkdirAll(refsDir, 0755)
-	err := filepath.Walk(refsDir, func(path string, fileInfo os.FileInfo, fileError error) error {
-
-		// Check if this file is a symlink
-		linkPath, err := os.Readlink(path)
-		if err == nil {
-			destFileInfo, err := os.Stat(linkPath)
-			if err == nil {
-				tagDir := filepath.Dir(path)
-
-				// Determine the ref
-				ref := fmt.Sprintf("%s:%s", strings.TrimLeft(
-					strings.TrimPrefix(filepath.Dir(filepath.Dir(tagDir)), refsDir), "/\\"),
-					filepath.Base(tagDir))
-
-				// Init hashmap entry if does not exist
-				if _, ok := refs[ref]; !ok {
-					refs[ref] = map[string]string{}
-				}
-
-				// Add data to entry based on file name (symlink name)
-				base := filepath.Base(path)
-				switch base {
-				case "chart":
-					refs[ref]["name"] = filepath.Base(filepath.Dir(filepath.Dir(linkPath)))
-					refs[ref]["version"] = destFileInfo.Name()
-				case "content":
-					shaPrefix := filepath.Base(filepath.Dir(linkPath))
-					digest := fmt.Sprintf("%s%s", shaPrefix, destFileInfo.Name())
-
-					// Make sure the filename looks like a sha256 digest (64 chars)
-					if len(digest) == 64 {
-						refs[ref]["digest"] = digest[:7]
-						refs[ref]["size"] = byteCountBinary(destFileInfo.Size())
-						refs[ref]["created"] = units.HumanDuration(time.Now().UTC().Sub(destFileInfo.ModTime()))
-					}
-				}
-			}
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		return err
-	}
-
-	for ref, d := range refs {
-		allKeysFound := true
-		for _, v := range []string{"name", "version", "digest", "size", "created"} {
-			if _, ok := d[v]; !ok {
-				allKeysFound = false
-				break
-			}
-		}
-		if !allKeysFound {
-			continue
-		}
-		table.AddRow(ref, d["name"], d["version"], d["digest"], d["size"], d["created"])
-	}
-
-	_, err = fmt.Fprintln(c.Out, table.String())
-	return err
-}
-
 // PullChart downloads a chart from a registry
 func (c *Client) PullChart(ref *Reference) error {
 	ctx := context.Background()
@@ -207,9 +133,7 @@ func (c *Client) PullChart(ref *Reference) error {
 	}
 
 	// Create chart symlink
-	chartLinkPath := filepath.Join(tagDir, "chart")
-	os.Remove(chartLinkPath)
-	err = os.Symlink(chartPath, chartLinkPath)
+	err = createSymlink(chartPath, filepath.Join(tagDir, "chart"))
 	if err != nil {
 		return err
 	}
@@ -220,8 +144,7 @@ func (c *Client) PullChart(ref *Reference) error {
 		return errors.New("Error retrieving meta layer")
 	}
 	digest := checksum.FromBytes(metaJsonRaw).String()
-	digestLeft := digest[7:9]
-	digestRight := digest[9:71]
+	digestLeft, digestRight := splitDigest(digest)
 	metaPathDir := filepath.Join(c.CacheRootDir, "blobs", "meta", "sha256", digestLeft)
 	metaPath := filepath.Join(metaPathDir, digestRight)
 	if _, err := os.Stat(metaPath); err != nil && os.IsNotExist(err) {
@@ -233,9 +156,7 @@ func (c *Client) PullChart(ref *Reference) error {
 	}
 
 	// Create meta symlink
-	metaLinkPath := filepath.Join(tagDir, "meta")
-	os.Remove(metaLinkPath)
-	err = os.Symlink(metaPath, metaLinkPath)
+	err = createSymlink(metaPath, filepath.Join(tagDir, "meta"))
 	if err != nil {
 		return err
 	}
@@ -246,8 +167,7 @@ func (c *Client) PullChart(ref *Reference) error {
 		return errors.New("Error retrieving content layer")
 	}
 	digest = checksum.FromBytes(contentRaw).String()
-	digestLeft = digest[7:9]
-	digestRight = digest[9:71]
+	digestLeft, digestRight = splitDigest(digest)
 	contentPathDir := filepath.Join(c.CacheRootDir, "blobs", "content", "sha256", digestLeft)
 	contentPath := filepath.Join(contentPathDir, digestRight)
 	if _, err := os.Stat(contentPath); err != nil && os.IsNotExist(err) {
@@ -259,9 +179,7 @@ func (c *Client) PullChart(ref *Reference) error {
 	}
 
 	// Create content symlink
-	contentLinkPath := filepath.Join(tagDir, "content")
-	os.Remove(contentLinkPath)
-	err = os.Symlink(contentPath, contentLinkPath)
+	err = createSymlink(contentPath, filepath.Join(tagDir, "content"))
 	if err != nil {
 		return err
 	}
@@ -344,9 +262,7 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 	}
 
 	// Create chart symlink
-	chartLinkPath := filepath.Join(tagDir, "chart")
-	os.Remove(chartLinkPath)
-	err := os.Symlink(chartPath, chartLinkPath)
+	err := createSymlink(chartPath, filepath.Join(tagDir, "chart"))
 	if err != nil {
 		return err
 	}
@@ -361,8 +277,7 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 
 	// Save meta blob
 	digest := checksum.FromBytes(metaJsonRaw).String()
-	digestLeft := digest[7:9]
-	digestRight := digest[9:71]
+	digestLeft, digestRight := splitDigest(digest)
 	metaPathDir := filepath.Join(c.CacheRootDir, "blobs", "meta", "sha256", digestLeft)
 	metaPath := filepath.Join(metaPathDir, digestRight)
 	if _, err := os.Stat(metaPath); err != nil && os.IsNotExist(err) {
@@ -374,9 +289,7 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 	}
 
 	// Create meta symlink
-	metaLinkPath := filepath.Join(tagDir, "meta")
-	os.Remove(metaLinkPath)
-	err = os.Symlink(metaPath, metaLinkPath)
+	err = createSymlink(metaPath, filepath.Join(tagDir, "meta"))
 	if err != nil {
 		return err
 	}
@@ -394,8 +307,7 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 		return err
 	}
 	digest = checksum.FromBytes(contentRaw).String()
-	digestLeft = digest[7:9]
-	digestRight = digest[9:71]
+	digestLeft, digestRight = splitDigest(digest)
 	contentPathDir := filepath.Join(c.CacheRootDir, "blobs", "content", "sha256", digestLeft)
 	contentPath := filepath.Join(contentPathDir, digestRight)
 	if _, err := os.Stat(contentPath); err != nil && os.IsNotExist(err) {
@@ -409,15 +321,113 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 	}
 
 	// Create content symlink
-	contentLinkPath := filepath.Join(tagDir, "content")
-	os.Remove(contentLinkPath)
-	err = os.Symlink(contentPath, contentLinkPath)
+	err = createSymlink(contentPath, filepath.Join(tagDir, "content"))
 	if err != nil {
 		return err
 	}
 
 	fmt.Fprintf(c.Out, "repo: %s\ntag: %s\ndigest: %s\n", ref.Locator, ref.Object, digest)
 	return nil
+}
+
+// ListCharts lists locally stored charts
+func (c *Client) ListCharts() error {
+	table := uitable.New()
+	table.MaxColWidth = 60
+	table.AddRow("REF", "NAME", "VERSION", "DIGEST", "SIZE", "CREATED")
+
+	refs, err := c.getAllRefs()
+	if err != nil {
+		return err
+	}
+
+	for k, ref := range refs {
+		table.AddRow(k, ref["name"], ref["version"], ref["digest"], ref["size"], ref["created"])
+	}
+
+	_, err = fmt.Fprintln(c.Out, table.String())
+	return err
+}
+
+func (c *Client) getAllRefs() (map[string]map[string]string, error) {
+	refs := map[string]map[string]string{}
+	refsDir := filepath.Join(c.CacheRootDir, "refs")
+
+	// Walk the storage dir, check for symlinks under "refs" dir pointing to valid files in "blobs/" and "charts/"
+	err := filepath.Walk(refsDir, func(path string, fileInfo os.FileInfo, fileError error) error {
+
+		// Check if this file is a symlink
+		linkPath, err := os.Readlink(path)
+		if err == nil {
+			destFileInfo, err := os.Stat(linkPath)
+			if err == nil {
+				tagDir := filepath.Dir(path)
+
+				// Determine the ref
+				ref := fmt.Sprintf("%s:%s", strings.TrimLeft(
+					strings.TrimPrefix(filepath.Dir(filepath.Dir(tagDir)), refsDir), "/\\"),
+					filepath.Base(tagDir))
+
+				// Init hashmap entry if does not exist
+				if _, ok := refs[ref]; !ok {
+					refs[ref] = map[string]string{}
+				}
+
+				// Add data to entry based on file name (symlink name)
+				base := filepath.Base(path)
+				switch base {
+				case "chart":
+					refs[ref]["name"] = filepath.Base(filepath.Dir(filepath.Dir(linkPath)))
+					refs[ref]["version"] = destFileInfo.Name()
+				case "content":
+					shaPrefix := filepath.Base(filepath.Dir(linkPath))
+					digest := fmt.Sprintf("%s%s", shaPrefix, destFileInfo.Name())
+
+					// Make sure the filename looks like a sha256 digest (64 chars)
+					if len(digest) == 64 {
+						refs[ref]["digest"] = digest[:7]
+						refs[ref]["size"] = byteCountBinary(destFileInfo.Size())
+						refs[ref]["created"] = units.HumanDuration(time.Now().UTC().Sub(destFileInfo.ModTime()))
+					}
+				}
+			}
+		}
+
+		return nil
+	})
+
+	// Filter out any refs that are incomplete (do not have all required fields)
+	for k, ref := range refs {
+		allKeysFound := true
+		for _, v := range []string{"name", "version", "digest", "size", "created"} {
+			if _, ok := ref[v]; !ok {
+				allKeysFound = false
+				break
+			}
+		}
+		if !allKeysFound {
+			delete(refs, k)
+		}
+	}
+
+	return refs, err
+}
+
+// Returns a sha256 digest in two parts, on with first 2 chars and one with second 62 chars
+func splitDigest(digest string) (string, string) {
+	var digestLeft, digestRight string
+	digest = strings.TrimPrefix(digest, "sha256:")
+	if len(digest) == 64 {
+		digestLeft = digest[0:2]
+		digestRight = digest[2:64]
+	}
+	return digestLeft, digestRight
+}
+
+func createSymlink(src string, dest string) error {
+	os.Remove(dest)
+	err := os.Symlink(src, dest)
+	return err
 }
 
 // byteCountBinary produces a human-readable file size
