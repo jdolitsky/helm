@@ -24,12 +24,9 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"strings"
-	"time"
 
 	"github.com/deislabs/oras/pkg/content"
 	"github.com/deislabs/oras/pkg/oras"
-	"github.com/docker/go-units"
 	"github.com/gosuri/uitable"
 	checksum "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -39,34 +36,6 @@ import (
 	"k8s.io/helm/pkg/chartutil"
 )
 
-const (
-	// HelmChartMetaMediaType is the reserved media type for Helm chart metadata
-	HelmChartMetaMediaType = "application/vnd.cncf.helm.chart.meta.v1+json"
-
-	// HelmChartPackageMediaType is the reserved media type for Helm chart package content
-	HelmChartContentMediaType = "application/vnd.cncf.helm.chart.content.v1+tar"
-
-	// HelmChartMetaFileName is the reserved file name for Helm chart metadata
-	HelmChartMetaFileName = "chart-meta.json"
-
-	// HelmChartContentFileName is the reserved file name for Helm chart package content
-	HelmChartContentFileName = "chart-content.tgz"
-
-	// HelmChartNameAnnotation is the reserved annotation key for Helm chart name
-	HelmChartNameAnnotation = "chart.name"
-
-	// HelmChartVersionAnnotation is the reserved annotation key for Helm chart version
-	HelmChartVersionAnnotation = "chart.version"
-)
-
-// KnownMediaTypes returns a list of layer mediaTypes that the Helm client knows about
-func KnownMediaTypes() []string {
-	return []string{
-		HelmChartMetaMediaType,
-		HelmChartContentMediaType,
-	}
-}
-
 type (
 	// Client works with OCI-compliant registries and local Helm chart cache
 	Client struct {
@@ -75,6 +44,65 @@ type (
 		Resolver     Resolver
 	}
 )
+
+// RemoveChart deletes a locally saved chart
+func (c *Client) RemoveChart(ref *Reference) error {
+	tagDir := filepath.Join(c.CacheRootDir, "refs", ref.Locator, "tags", ref.Object)
+	fmt.Fprintf(c.Out, "Deleting %s\n", ref.String())
+	err := os.RemoveAll(tagDir)
+	return err
+}
+
+// ListCharts lists locally stored charts
+func (c *Client) ListCharts() error {
+	table := uitable.New()
+	table.MaxColWidth = 60
+	table.AddRow("REF", "NAME", "VERSION", "DIGEST", "SIZE", "CREATED")
+
+	refs, err := getAllChartRefs(filepath.Join(c.CacheRootDir, "refs"))
+	if err != nil {
+		return err
+	}
+
+	for k, ref := range refs {
+		table.AddRow(k, ref["name"], ref["version"], ref["digest"], ref["size"], ref["created"])
+	}
+
+	_, err = fmt.Fprintln(c.Out, table.String())
+	return err
+}
+
+// PushChart uploads a chart to a registry
+func (c *Client) PushChart(ref *Reference) error {
+	memoryStore := content.NewMemoryStore()
+	tagDir := filepath.Join(c.CacheRootDir, "refs", ref.Locator, "tags", ref.Object)
+
+	// create meta layer
+	metaJsonRaw, err := getSymlinkDestContent(filepath.Join(tagDir, "meta"))
+	if err != nil {
+		return err
+	}
+	metaLayer := memoryStore.Add(HelmChartMetaFileName, HelmChartMetaMediaType, metaJsonRaw)
+
+	// create content layer
+	contentRaw, err := getSymlinkDestContent(filepath.Join(tagDir, "content"))
+	if err != nil {
+		return err
+	}
+	contentLayer := memoryStore.Add(HelmChartContentFileName, HelmChartContentMediaType, contentRaw)
+
+	// set annotations on content layer (chart name and version)
+	err = setLayerAnnotationsFromChartLink(contentLayer, filepath.Join(tagDir, "chart"))
+	if err != nil {
+		return err
+	}
+
+	// initiate push to remote
+	fmt.Fprintf(c.Out, "Pushing %s\nsha256: %s\n", ref.String(), contentLayer.Digest)
+	layers := []ocispec.Descriptor{metaLayer, contentLayer}
+	err = oras.Push(context.Background(), c.Resolver, ref.String(), memoryStore, layers)
+	return err
+}
 
 // PullChart downloads a chart from a registry
 func (c *Client) PullChart(ref *Reference) error {
@@ -180,65 +208,7 @@ func (c *Client) PullChart(ref *Reference) error {
 
 	// Create content symlink
 	err = createSymlink(contentPath, filepath.Join(tagDir, "content"))
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// PushChart uploads a chart to a registry
-func (c *Client) PushChart(ref *Reference) error {
-	ctx := context.Background()
-	memoryStore := content.NewMemoryStore()
-	tagDir := filepath.Join(c.CacheRootDir, "refs", ref.Locator, "tags", ref.Object)
-
-	// create meta layer
-	metaLink := filepath.Join(tagDir, "meta")
-	metaPath, err := os.Readlink(metaLink)
-	if err != nil {
-		return err
-	}
-	metaContent, err := ioutil.ReadFile(metaPath)
-	if err != nil {
-		return err
-	}
-	metaLayer := memoryStore.Add(HelmChartMetaFileName, HelmChartMetaMediaType, metaContent)
-
-	// create content layer
-	contentLink := filepath.Join(tagDir, "content")
-	contentPath, err := os.Readlink(contentLink)
-	if err != nil {
-		return err
-	}
-	chartContent, err := ioutil.ReadFile(contentPath)
-	if err != nil {
-		return err
-	}
-	contentLayer := memoryStore.Add(HelmChartContentFileName, HelmChartContentMediaType, chartContent)
-
-	// add chart name and version as annotations
-	chartLink := filepath.Join(tagDir, "chart")
-	chartPath, err := os.Readlink(chartLink)
-	if err != nil {
-		return err
-	}
-	chartName := filepath.Base(filepath.Dir(filepath.Dir(chartPath)))
-	chartVersion := filepath.Base(chartPath)
-	contentLayer.Annotations[HelmChartNameAnnotation] = chartName
-	contentLayer.Annotations[HelmChartVersionAnnotation] = chartVersion
-
-	// do push
-	layers := []ocispec.Descriptor{metaLayer, contentLayer}
-	fmt.Fprintf(c.Out, "Pushing %s\nsha256: %s\n", ref, contentLayer.Digest)
-	return oras.Push(ctx, c.Resolver, ref.String(), memoryStore, layers)
-}
-
-// RemoveChart deletes a locally saved chart
-func (c *Client) RemoveChart(ref *Reference) error {
-	tagDir := filepath.Join(c.CacheRootDir, "refs", ref.Locator, "tags", ref.Object)
-	fmt.Fprintf(c.Out, "Deleting %s\n", ref.String())
-	return os.RemoveAll(tagDir)
+	return err
 }
 
 // SaveChart stores a copy of chart in local cache
@@ -277,6 +247,7 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 
 	// Save meta blob
 	digest := checksum.FromBytes(metaJsonRaw).String()
+	fmt.Fprintf(c.Out, "repo: %s\ntag: %s\ndigest: %s\n", ref.Locator, ref.Object, digest)
 	digestLeft, digestRight := splitDigest(digest)
 	metaPathDir := filepath.Join(c.CacheRootDir, "blobs", "meta", "sha256", digestLeft)
 	metaPath := filepath.Join(metaPathDir, digestRight)
@@ -322,124 +293,5 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 
 	// Create content symlink
 	err = createSymlink(contentPath, filepath.Join(tagDir, "content"))
-	if err != nil {
-		return err
-	}
-
-	fmt.Fprintf(c.Out, "repo: %s\ntag: %s\ndigest: %s\n", ref.Locator, ref.Object, digest)
-	return nil
-}
-
-// ListCharts lists locally stored charts
-func (c *Client) ListCharts() error {
-	table := uitable.New()
-	table.MaxColWidth = 60
-	table.AddRow("REF", "NAME", "VERSION", "DIGEST", "SIZE", "CREATED")
-
-	refs, err := c.getAllRefs()
-	if err != nil {
-		return err
-	}
-
-	for k, ref := range refs {
-		table.AddRow(k, ref["name"], ref["version"], ref["digest"], ref["size"], ref["created"])
-	}
-
-	_, err = fmt.Fprintln(c.Out, table.String())
 	return err
-}
-
-func (c *Client) getAllRefs() (map[string]map[string]string, error) {
-	refs := map[string]map[string]string{}
-	refsDir := filepath.Join(c.CacheRootDir, "refs")
-
-	// Walk the storage dir, check for symlinks under "refs" dir pointing to valid files in "blobs/" and "charts/"
-	err := filepath.Walk(refsDir, func(path string, fileInfo os.FileInfo, fileError error) error {
-
-		// Check if this file is a symlink
-		linkPath, err := os.Readlink(path)
-		if err == nil {
-			destFileInfo, err := os.Stat(linkPath)
-			if err == nil {
-				tagDir := filepath.Dir(path)
-
-				// Determine the ref
-				ref := fmt.Sprintf("%s:%s", strings.TrimLeft(
-					strings.TrimPrefix(filepath.Dir(filepath.Dir(tagDir)), refsDir), "/\\"),
-					filepath.Base(tagDir))
-
-				// Init hashmap entry if does not exist
-				if _, ok := refs[ref]; !ok {
-					refs[ref] = map[string]string{}
-				}
-
-				// Add data to entry based on file name (symlink name)
-				base := filepath.Base(path)
-				switch base {
-				case "chart":
-					refs[ref]["name"] = filepath.Base(filepath.Dir(filepath.Dir(linkPath)))
-					refs[ref]["version"] = destFileInfo.Name()
-				case "content":
-					shaPrefix := filepath.Base(filepath.Dir(linkPath))
-					digest := fmt.Sprintf("%s%s", shaPrefix, destFileInfo.Name())
-
-					// Make sure the filename looks like a sha256 digest (64 chars)
-					if len(digest) == 64 {
-						refs[ref]["digest"] = digest[:7]
-						refs[ref]["size"] = byteCountBinary(destFileInfo.Size())
-						refs[ref]["created"] = units.HumanDuration(time.Now().UTC().Sub(destFileInfo.ModTime()))
-					}
-				}
-			}
-		}
-
-		return nil
-	})
-
-	// Filter out any refs that are incomplete (do not have all required fields)
-	for k, ref := range refs {
-		allKeysFound := true
-		for _, v := range []string{"name", "version", "digest", "size", "created"} {
-			if _, ok := ref[v]; !ok {
-				allKeysFound = false
-				break
-			}
-		}
-		if !allKeysFound {
-			delete(refs, k)
-		}
-	}
-
-	return refs, err
-}
-
-// Returns a sha256 digest in two parts, on with first 2 chars and one with second 62 chars
-func splitDigest(digest string) (string, string) {
-	var digestLeft, digestRight string
-	digest = strings.TrimPrefix(digest, "sha256:")
-	if len(digest) == 64 {
-		digestLeft = digest[0:2]
-		digestRight = digest[2:64]
-	}
-	return digestLeft, digestRight
-}
-
-func createSymlink(src string, dest string) error {
-	os.Remove(dest)
-	err := os.Symlink(src, dest)
-	return err
-}
-
-// byteCountBinary produces a human-readable file size
-func byteCountBinary(b int64) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
 }
