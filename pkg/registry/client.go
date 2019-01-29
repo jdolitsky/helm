@@ -152,41 +152,118 @@ func (c *Client) ListCharts() error {
 
 // PullChart downloads a chart from a registry
 func (c *Client) PullChart(ref *Reference) error {
-	destDir := filepath.Join(c.CacheRootDir, "blobs", "sha256")
-	os.MkdirAll(destDir, 0755)
 	ctx := context.Background()
 	memoryStore := content.NewMemoryStore()
 
+	// Create directory which will contain nothing but symlinks
+	tagDir := filepath.Join(c.CacheRootDir, "refs", ref.Locator, "tags", ref.Object)
+	os.MkdirAll(tagDir, 0755)
+
 	fmt.Fprintf(c.Out, "Pulling %s\n", ref.String())
-	pullContents, err := oras.Pull(ctx, c.Resolver, ref.String(), memoryStore, KnownMediaTypes()...)
+	layers, err := oras.Pull(ctx, c.Resolver, ref.String(), memoryStore, KnownMediaTypes()...)
 	if err != nil {
 		return err
 	}
 
-	for _, descriptor := range pullContents {
-		digest := descriptor.Digest.Hex()
-		fmt.Fprintf(c.Out, "sha256: %s\n", digest)
-		_, content, ok := memoryStore.Get(descriptor)
-		if !ok {
-			return errors.New("error accessing pulled content")
-		}
+	if len(layers) != 2 {
+		return errors.New("Manifest does not contain exactly 2 layers")
+	}
 
-		blobPath := filepath.Join(destDir, digest)
-		if _, err := os.Stat(blobPath); err != nil && os.IsNotExist(err) {
-			err := ioutil.WriteFile(blobPath, content, 0644)
-			if err != nil {
-				return err
-			}
+	var metaLayer, contentLayer ocispec.Descriptor
+	for _, layer := range layers {
+		switch layer.MediaType {
+		case HelmChartMetaMediaType:
+			metaLayer = layer
+		case HelmChartContentMediaType:
+			contentLayer = layer
 		}
+	}
 
-		tagDir := filepath.Join(c.CacheRootDir, "refs", ref.Locator)
-		os.MkdirAll(tagDir, 0755)
-		tagPath := filepath.Join(tagDir, ref.Object)
-		os.Remove(tagPath)
-		err = os.Symlink(blobPath, tagPath)
+	if metaLayer.Size == 0 {
+		return errors.New("Manifest does not contain a Helm chart meta layer")
+	}
+
+	if contentLayer.Size == 0 {
+		return errors.New("Manifest does not contain a Helm chart content layer")
+	}
+
+	// extract/separate the name and version
+	name, ok := contentLayer.Annotations[HelmChartNameAnnotation]
+	if !ok {
+		return errors.New("Could not find chart name in annotations")
+	}
+	version, ok := contentLayer.Annotations[HelmChartVersionAnnotation]
+	if !ok {
+		return errors.New("Could not find chart version in annotations")
+	}
+	chartPathDir := filepath.Join(c.CacheRootDir, "charts", name, "versions")
+	chartPath := filepath.Join(chartPathDir, version)
+	if _, err := os.Stat(chartPath); err != nil && os.IsNotExist(err) {
+		os.MkdirAll(chartPathDir, 0755)
+		err := ioutil.WriteFile(chartPath, []byte("-"), 0644)
 		if err != nil {
 			return err
 		}
+	}
+
+	// Create chart symlink
+	chartLinkPath := filepath.Join(tagDir, "chart")
+	os.Remove(chartLinkPath)
+	err = os.Symlink(chartPath, chartLinkPath)
+	if err != nil {
+		return err
+	}
+
+	// Save meta blob
+	_, metaJsonRaw, ok := memoryStore.Get(metaLayer)
+	if !ok {
+		return errors.New("Error retrieving meta layer")
+	}
+	digest := checksum.FromBytes(metaJsonRaw).String()
+	digestLeft := digest[7:9]
+	digestRight := digest[9:71]
+	metaPathDir := filepath.Join(c.CacheRootDir, "blobs", "meta", "sha256", digestLeft)
+	metaPath := filepath.Join(metaPathDir, digestRight)
+	if _, err := os.Stat(metaPath); err != nil && os.IsNotExist(err) {
+		os.MkdirAll(metaPathDir, 0755)
+		err := ioutil.WriteFile(metaPath, metaJsonRaw, 0644)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Create meta symlink
+	metaLinkPath := filepath.Join(tagDir, "meta")
+	os.Remove(metaLinkPath)
+	err = os.Symlink(metaPath, metaLinkPath)
+	if err != nil {
+		return err
+	}
+
+	// Save content blob
+	_, contentRaw, ok := memoryStore.Get(contentLayer)
+	if !ok {
+		return errors.New("Error retrieving content layer")
+	}
+	digest = checksum.FromBytes(contentRaw).String()
+	digestLeft = digest[7:9]
+	digestRight = digest[9:71]
+	contentPathDir := filepath.Join(c.CacheRootDir, "blobs", "content", "sha256", digestLeft)
+	contentPath := filepath.Join(contentPathDir, digestRight)
+	if _, err := os.Stat(contentPath); err != nil && os.IsNotExist(err) {
+		os.MkdirAll(contentPathDir, 0755)
+		err := ioutil.WriteFile(contentPath, contentRaw, 0644)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Create content symlink
+	contentLinkPath := filepath.Join(tagDir, "content")
+	os.Remove(contentLinkPath)
+	err = os.Symlink(contentPath, contentLinkPath)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -312,11 +389,11 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to save")
 	}
-	content, err := ioutil.ReadFile(tmpFile)
+	contentRaw, err := ioutil.ReadFile(tmpFile)
 	if err != nil {
 		return err
 	}
-	digest = checksum.FromBytes(content).String()
+	digest = checksum.FromBytes(contentRaw).String()
 	digestLeft = digest[7:9]
 	digestRight = digest[9:71]
 	contentPathDir := filepath.Join(c.CacheRootDir, "blobs", "content", "sha256", digestLeft)
@@ -331,7 +408,7 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 		os.Remove(tmpFile)
 	}
 
-	// Create meta symlink
+	// Create content symlink
 	contentLinkPath := filepath.Join(tagDir, "content")
 	os.Remove(contentLinkPath)
 	err = os.Symlink(contentPath, contentLinkPath)
