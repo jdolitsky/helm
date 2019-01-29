@@ -17,8 +17,8 @@ limitations under the License.
 package registry // import "k8s.io/helm/pkg/registry"
 
 import (
-	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -31,12 +31,12 @@ import (
 	"github.com/deislabs/oras/pkg/oras"
 	"github.com/docker/go-units"
 	"github.com/gosuri/uitable"
+	checksum "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 
 	"k8s.io/helm/pkg/chart"
 	"k8s.io/helm/pkg/chartutil"
-	"k8s.io/helm/pkg/provenance"
 )
 
 const (
@@ -248,27 +248,82 @@ func (c *Client) RemoveChart(ref *Reference) error {
 
 // SaveChart stores a copy of chart in local cache
 func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
-	destDir := filepath.Join(c.CacheRootDir, "blobs", "sha256")
+
+	// Create directory which will contain nothing but symlinks
+	tagDir := filepath.Join(c.CacheRootDir, "refs", ref.Locator, "tags", ref.Object)
+	os.MkdirAll(tagDir, 0755)
+
+	// extract/separate the name and version from other metadata
+	name := ch.Metadata.Name
+	version := ch.Metadata.Version
+	chartPathDir := filepath.Join(c.CacheRootDir, "charts", name, "versions")
+	chartPath := filepath.Join(chartPathDir, version)
+	if _, err := os.Stat(chartPath); err != nil && os.IsNotExist(err) {
+		os.MkdirAll(chartPathDir, 0755)
+		err := ioutil.WriteFile(chartPath, []byte("-"), 0644)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Create chart symlink
+	chartLinkPath := filepath.Join(tagDir, "chart")
+	os.Remove(chartLinkPath)
+	err := os.Symlink(chartPath, chartLinkPath)
+	if err != nil {
+		return err
+	}
+
+	// Clear name and version from Chart.yaml and convert to json
+	ch.Metadata.Name = ""
+	ch.Metadata.Version = ""
+	metaJsonRaw, err := json.Marshal(ch.Metadata)
+	if err != nil {
+		return err
+	}
+
+	// Save meta blob
+	digest := checksum.FromBytes(metaJsonRaw).String()
+	digestLeft := digest[7:9]
+	digestRight := digest[9:71]
+	metaPathDir := filepath.Join(c.CacheRootDir, "blobs", "meta", "sha256", digestLeft)
+	metaPath := filepath.Join(metaPathDir, digestRight)
+	if _, err := os.Stat(metaPath); err != nil && os.IsNotExist(err) {
+		os.MkdirAll(metaPathDir, 0755)
+		err := ioutil.WriteFile(metaPath, metaJsonRaw, 0644)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Create meta symlink
+	metaLinkPath := filepath.Join(tagDir, "meta")
+	os.Remove(metaLinkPath)
+	err = os.Symlink(metaPath, metaLinkPath)
+	if err != nil {
+		return err
+	}
+
+	// Save content blob
+	ch.Metadata = &chart.Metadata{Name: "-", Version: "-"}
+	destDir := filepath.Join(c.CacheRootDir, "blobs", ".build")
 	os.MkdirAll(destDir, 0755)
 	tmpFile, err := chartutil.Save(ch, destDir)
 	if err != nil {
 		return errors.Wrap(err, "failed to save")
 	}
-
 	content, err := ioutil.ReadFile(tmpFile)
 	if err != nil {
 		return err
 	}
-
-	digest, err := provenance.Digest(bytes.NewBuffer(content))
-	if err != nil {
-		return err
-	}
-
-	blobPath := filepath.Join(destDir, digest)
-
-	if _, err := os.Stat(blobPath); err != nil && os.IsNotExist(err) {
-		err = os.Rename(tmpFile, blobPath)
+	digest = checksum.FromBytes(content).String()
+	digestLeft = digest[7:9]
+	digestRight = digest[9:71]
+	contentPathDir := filepath.Join(c.CacheRootDir, "blobs", "content", "sha256", digestLeft)
+	contentPath := filepath.Join(contentPathDir, digestRight)
+	if _, err := os.Stat(contentPath); err != nil && os.IsNotExist(err) {
+		os.MkdirAll(contentPathDir, 0755)
+		err = os.Rename(tmpFile, contentPath)
 		if err != nil {
 			return err
 		}
@@ -276,11 +331,10 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 		os.Remove(tmpFile)
 	}
 
-	blobLinkParentDir := filepath.Join(c.CacheRootDir, "refs", ref.Locator)
-	os.MkdirAll(blobLinkParentDir, 0755)
-	blobLink := filepath.Join(blobLinkParentDir, ref.Object)
-	os.Remove(blobLink)
-	err = os.Symlink(blobPath, blobLink)
+	// Create meta symlink
+	contentLinkPath := filepath.Join(tagDir, "content")
+	os.Remove(contentLinkPath)
+	err = os.Symlink(contentPath, contentLinkPath)
 	if err != nil {
 		return err
 	}
