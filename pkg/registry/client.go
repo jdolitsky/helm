@@ -20,22 +20,21 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"io/ioutil"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
 	"github.com/deislabs/oras/pkg/content"
 	"github.com/deislabs/oras/pkg/oras"
 	"github.com/docker/go-units"
 	"github.com/gosuri/uitable"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
-	"io"
-	"io/ioutil"
+
 	"k8s.io/helm/pkg/chart"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
-
-	//"strings"
-
 	"k8s.io/helm/pkg/chartutil"
 	"k8s.io/helm/pkg/provenance"
 )
@@ -71,7 +70,7 @@ func (c *Client) ListCharts() error {
 	table.MaxColWidth = 60
 	table.AddRow("REF", "NAME", "VERSION", "DIGEST", "SIZE", "CREATED")
 
-	// Walk the storage dir, check for symlinks under "refs" dir pointing to valid files in "blobs/sha256"
+	// Walk the storage dir, check for symlinks under "refs" dir pointing to valid files in "blobs/"
 	refs := map[string]map[string]string{}
 	refsDir := filepath.Join(c.CacheRootDir, "refs")
 	os.MkdirAll(refsDir, 0755)
