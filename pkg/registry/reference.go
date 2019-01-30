@@ -17,6 +17,8 @@ limitations under the License.
 package registry // import "k8s.io/helm/pkg/registry"
 
 import (
+	"strings"
+
 	"github.com/containerd/containerd/reference"
 )
 
@@ -35,4 +37,9 @@ func ParseReference(s string) (*Reference, error) {
 	}
 	ref := Reference{&spec}
 	return &ref, nil
+}
+
+// Repo returns a reference's repo minus the hostname
+func (ref *Reference) Repo() string {
+	return strings.TrimPrefix(strings.TrimPrefix(ref.Locator, ref.Hostname()), "/")
 }
