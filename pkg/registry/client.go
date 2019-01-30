@@ -110,8 +110,7 @@ func (c *Client) PullChart(ref *Reference) error {
 	memoryStore := content.NewMemoryStore()
 
 	// Create directory which will contain nothing but symlinks
-	tagDir := filepath.Join(c.CacheRootDir, "refs", ref.Locator, "tags", ref.Object)
-	os.MkdirAll(tagDir, 0755)
+	tagDir := mkdir(filepath.Join(c.CacheRootDir, "refs", ref.Locator, "tags", ref.Object))
 
 	fmt.Fprintf(c.Out, "Pulling %s\n", ref.String())
 	layers, err := oras.Pull(ctx, c.Resolver, ref.String(), memoryStore, KnownMediaTypes()...)
@@ -119,45 +118,22 @@ func (c *Client) PullChart(ref *Reference) error {
 		return err
 	}
 
-	if len(layers) != 2 {
-		return errors.New("Manifest does not contain exactly 2 layers")
+	// Retrieve just the meta and content layers
+	metaLayer, contentLayer, err := extractLayers(layers)
+	if err != nil {
+		return err
 	}
 
-	var metaLayer, contentLayer ocispec.Descriptor
-	for _, layer := range layers {
-		switch layer.MediaType {
-		case HelmChartMetaMediaType:
-			metaLayer = layer
-		case HelmChartContentMediaType:
-			contentLayer = layer
-		}
+	// Extract chart name and version
+	name, version, err := extractChartNameVersion(contentLayer)
+	if err != nil {
+		return err
 	}
 
-	if metaLayer.Size == 0 {
-		return errors.New("Manifest does not contain a Helm chart meta layer")
-	}
-
-	if contentLayer.Size == 0 {
-		return errors.New("Manifest does not contain a Helm chart content layer")
-	}
-
-	// extract/separate the name and version
-	name, ok := contentLayer.Annotations[HelmChartNameAnnotation]
-	if !ok {
-		return errors.New("Could not find chart name in annotations")
-	}
-	version, ok := contentLayer.Annotations[HelmChartVersionAnnotation]
-	if !ok {
-		return errors.New("Could not find chart version in annotations")
-	}
-	chartPathDir := filepath.Join(c.CacheRootDir, "charts", name, "versions")
-	chartPath := filepath.Join(chartPathDir, version)
-	if _, err := os.Stat(chartPath); err != nil && os.IsNotExist(err) {
-		os.MkdirAll(chartPathDir, 0755)
-		err := ioutil.WriteFile(chartPath, []byte("-"), 0644)
-		if err != nil {
-			return err
-		}
+	// Create chart file
+	chartPath, err := createChartFile(filepath.Join(c.CacheRootDir, "charts"), name, version)
+	if err != nil {
+		return err
 	}
 
 	// Create chart symlink
@@ -171,16 +147,9 @@ func (c *Client) PullChart(ref *Reference) error {
 	if !ok {
 		return errors.New("Error retrieving meta layer")
 	}
-	digest := checksum.FromBytes(metaJsonRaw).String()
-	digestLeft, digestRight := splitDigest(digest)
-	metaPathDir := filepath.Join(c.CacheRootDir, "blobs", "meta", "sha256", digestLeft)
-	metaPath := filepath.Join(metaPathDir, digestRight)
-	if _, err := os.Stat(metaPath); err != nil && os.IsNotExist(err) {
-		os.MkdirAll(metaPathDir, 0755)
-		err := ioutil.WriteFile(metaPath, metaJsonRaw, 0644)
-		if err != nil {
-			return err
-		}
+	metaPath, err := createDigestFile(filepath.Join(c.CacheRootDir, "blobs", "meta"), metaJsonRaw)
+	if err != nil {
+		return err
 	}
 
 	// Create meta symlink
@@ -194,16 +163,9 @@ func (c *Client) PullChart(ref *Reference) error {
 	if !ok {
 		return errors.New("Error retrieving content layer")
 	}
-	digest = checksum.FromBytes(contentRaw).String()
-	digestLeft, digestRight = splitDigest(digest)
-	contentPathDir := filepath.Join(c.CacheRootDir, "blobs", "content", "sha256", digestLeft)
-	contentPath := filepath.Join(contentPathDir, digestRight)
-	if _, err := os.Stat(contentPath); err != nil && os.IsNotExist(err) {
-		os.MkdirAll(contentPathDir, 0755)
-		err := ioutil.WriteFile(contentPath, contentRaw, 0644)
-		if err != nil {
-			return err
-		}
+	contentPath, err := createDigestFile(filepath.Join(c.CacheRootDir, "blobs", "content"), contentRaw)
+	if err != nil {
+		return err
 	}
 
 	// Create content symlink
@@ -215,8 +177,7 @@ func (c *Client) PullChart(ref *Reference) error {
 func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 
 	// Create directory which will contain nothing but symlinks
-	tagDir := filepath.Join(c.CacheRootDir, "refs", ref.Locator, "tags", ref.Object)
-	os.MkdirAll(tagDir, 0755)
+	tagDir := mkdir(filepath.Join(c.CacheRootDir, "refs", ref.Locator, "tags", ref.Object))
 
 	// extract/separate the name and version from other metadata
 	name := ch.Metadata.Name
@@ -267,8 +228,7 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 
 	// Save content blob
 	ch.Metadata = &chart.Metadata{Name: "-", Version: "-"}
-	destDir := filepath.Join(c.CacheRootDir, "blobs", ".build")
-	os.MkdirAll(destDir, 0755)
+	destDir := mkdir(filepath.Join(c.CacheRootDir, "blobs", ".build"))
 	tmpFile, err := chartutil.Save(ch, destDir)
 	if err != nil {
 		return errors.Wrap(err, "failed to save")

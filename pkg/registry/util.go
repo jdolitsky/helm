@@ -17,6 +17,7 @@ limitations under the License.
 package registry // import "k8s.io/helm/pkg/registry"
 
 import (
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -25,6 +26,7 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	checksum "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -92,17 +94,6 @@ func getAllChartRefs(refsRootDir string) (map[string]map[string]string, error) {
 	return refs, err
 }
 
-// splitDigest returns a sha256 digest in two parts, on with first 2 chars and one with second 62 chars
-func splitDigest(digest string) (string, string) {
-	var digestLeft, digestRight string
-	digest = strings.TrimPrefix(digest, "sha256:")
-	if len(digest) == 64 {
-		digestLeft = digest[0:2]
-		digestRight = digest[2:64]
-	}
-	return digestLeft, digestRight
-}
-
 // createSymlink creates a symbolic link, deleting existing one if exists
 func createSymlink(src string, dest string) error {
 	os.Remove(dest)
@@ -134,6 +125,87 @@ func setLayerAnnotationsFromChartLink(layer ocispec.Descriptor, chartLinkPath st
 	return nil
 }
 
+// extractLayers obtains the meta and content layers from a list of layers
+func extractLayers(layers []ocispec.Descriptor) (ocispec.Descriptor, ocispec.Descriptor, error) {
+	var metaLayer, contentLayer ocispec.Descriptor
+
+	if len(layers) != 2 {
+		return metaLayer, contentLayer, errors.New("manifest does not contain exactly 2 layers")
+	}
+
+	for _, layer := range layers {
+		switch layer.MediaType {
+		case HelmChartMetaMediaType:
+			metaLayer = layer
+		case HelmChartContentMediaType:
+			contentLayer = layer
+		}
+	}
+
+	if metaLayer.Size == 0 {
+		return metaLayer, contentLayer, errors.New("manifest does not contain a Helm chart meta layer")
+	}
+
+	if contentLayer.Size == 0 {
+		return metaLayer, contentLayer, errors.New("manifest does not contain a Helm chart content layer")
+	}
+
+	return metaLayer, contentLayer, nil
+}
+
+// extractChartNameVersion retrieves the chart name and version from layer annotations
+func extractChartNameVersion(layer ocispec.Descriptor) (string, string, error) {
+	name, ok := layer.Annotations[HelmChartNameAnnotation]
+	if !ok {
+		return "", "", errors.New("could not find chart name in annotations")
+	}
+	version, ok := layer.Annotations[HelmChartVersionAnnotation]
+	if !ok {
+		return "", "", errors.New("could not find chart version in annotations")
+	}
+	return name, version, nil
+}
+
+// createChartFile creates a file under "<chartsdir>" dir which is linked to by ref
+func createChartFile(chartsRootDir string, name string, version string) (string, error) {
+	chartPathDir := filepath.Join(chartsRootDir, name, "versions")
+	chartPath := filepath.Join(chartPathDir, version)
+	if _, err := os.Stat(chartPath); err != nil && os.IsNotExist(err) {
+		os.MkdirAll(chartPathDir, 0755)
+		err := ioutil.WriteFile(chartPath, []byte("-"), 0644)
+		if err != nil {
+			return "", err
+		}
+	}
+	return chartPath, nil
+}
+
+func createDigestFile(rootDir string, c []byte) (string, error) {
+	digest := checksum.FromBytes(c).String()
+	digestLeft, digestRight := splitDigest(digest)
+	pathDir := filepath.Join(rootDir, "sha256", digestLeft)
+	path := filepath.Join(pathDir, digestRight)
+	if _, err := os.Stat(path); err != nil && os.IsNotExist(err) {
+		os.MkdirAll(pathDir, 0755)
+		err := ioutil.WriteFile(path, c, 0644)
+		if err != nil {
+			return "", err
+		}
+	}
+	return path, nil
+}
+
+// splitDigest returns a sha256 digest in two parts, on with first 2 chars and one with second 62 chars
+func splitDigest(digest string) (string, string) {
+	var digestLeft, digestRight string
+	digest = strings.TrimPrefix(digest, "sha256:")
+	if len(digest) == 64 {
+		digestLeft = digest[0:2]
+		digestRight = digest[2:64]
+	}
+	return digestLeft, digestRight
+}
+
 // byteCountBinary produces a human-readable file size
 func byteCountBinary(b int64) string {
 	const unit = 1024
@@ -146,4 +218,10 @@ func byteCountBinary(b int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+
+// mkdir will create a directory (no error check) and return the path
+func mkdir(dir string) string {
+	os.MkdirAll(dir, 0755)
+	return dir
 }
