@@ -22,6 +22,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -149,9 +150,9 @@ func mkdir(dir string) string {
 	return dir
 }
 
-// getAllChartRefs returns a map of all refs stored in a refsRootDir
-func getAllChartRefs(refsRootDir string) (map[string]map[string]string, error) {
-	refs := map[string]map[string]string{}
+// getRefsSorted returns a map of all refs stored in a refsRootDir
+func getRefsSorted(refsRootDir string) ([]map[string]string, error) {
+	refsMap := map[string]map[string]string{}
 
 	// Walk the storage dir, check for symlinks under "refs" dir pointing to valid files in "blobs/" and "charts/"
 	err := filepath.Walk(refsRootDir, func(path string, fileInfo os.FileInfo, fileError error) error {
@@ -169,25 +170,25 @@ func getAllChartRefs(refsRootDir string) (map[string]map[string]string, error) {
 					filepath.Base(tagDir))
 
 				// Init hashmap entry if does not exist
-				if _, ok := refs[ref]; !ok {
-					refs[ref] = map[string]string{}
+				if _, ok := refsMap[ref]; !ok {
+					refsMap[ref] = map[string]string{}
 				}
 
 				// Add data to entry based on file name (symlink name)
 				base := filepath.Base(path)
 				switch base {
 				case "chart":
-					refs[ref]["name"] = filepath.Base(filepath.Dir(filepath.Dir(linkPath)))
-					refs[ref]["version"] = destFileInfo.Name()
+					refsMap[ref]["name"] = filepath.Base(filepath.Dir(filepath.Dir(linkPath)))
+					refsMap[ref]["version"] = destFileInfo.Name()
 				case "content":
 					shaPrefix := filepath.Base(filepath.Dir(linkPath))
 					digest := fmt.Sprintf("%s%s", shaPrefix, destFileInfo.Name())
 
 					// Make sure the filename looks like a sha256 digest (64 chars)
 					if len(digest) == 64 {
-						refs[ref]["digest"] = digest[:7]
-						refs[ref]["size"] = byteCountBinary(destFileInfo.Size())
-						refs[ref]["created"] = units.HumanDuration(time.Now().UTC().Sub(destFileInfo.ModTime()))
+						refsMap[ref]["digest"] = digest[:7]
+						refsMap[ref]["size"] = byteCountBinary(destFileInfo.Size())
+						refsMap[ref]["created"] = units.HumanDuration(time.Now().UTC().Sub(destFileInfo.ModTime()))
 					}
 				}
 			}
@@ -197,7 +198,7 @@ func getAllChartRefs(refsRootDir string) (map[string]map[string]string, error) {
 	})
 
 	// Filter out any refs that are incomplete (do not have all required fields)
-	for k, ref := range refs {
+	for k, ref := range refsMap {
 		allKeysFound := true
 		for _, v := range []string{"name", "version", "digest", "size", "created"} {
 			if _, ok := ref[v]; !ok {
@@ -206,8 +207,21 @@ func getAllChartRefs(refsRootDir string) (map[string]map[string]string, error) {
 			}
 		}
 		if !allKeysFound {
-			delete(refs, k)
+			delete(refsMap, k)
 		}
+	}
+
+	// Sort and convert to slice
+	var refs []map[string]string
+	keys := make([]string, 0, len(refsMap))
+	for key := range refsMap {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		ref := refsMap[key]
+		ref["ref"] = key
+		refs = append(refs, ref)
 	}
 
 	return refs, err

@@ -50,13 +50,13 @@ func (c *Client) ListCharts() error {
 	table.MaxColWidth = 60
 	table.AddRow("REF", "NAME", "VERSION", "DIGEST", "SIZE", "CREATED")
 
-	refs, err := getAllChartRefs(filepath.Join(c.CacheRootDir, "refs"))
+	refs, err := getRefsSorted(filepath.Join(c.CacheRootDir, "refs"))
 	if err != nil {
 		return err
 	}
 
-	for k, ref := range refs {
-		table.AddRow(k, ref["name"], ref["version"], ref["digest"], ref["size"], ref["created"])
+	for _, ref := range refs {
+		table.AddRow(ref["ref"], ref["name"], ref["version"], ref["digest"], ref["size"], ref["created"])
 	}
 
 	_, err = fmt.Fprintln(c.Out, table.String())
