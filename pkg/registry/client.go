@@ -28,7 +28,6 @@ import (
 	"github.com/deislabs/oras/pkg/content"
 	"github.com/deislabs/oras/pkg/oras"
 	"github.com/gosuri/uitable"
-	checksum "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 
@@ -44,14 +43,6 @@ type (
 		Resolver     Resolver
 	}
 )
-
-// RemoveChart deletes a locally saved chart
-func (c *Client) RemoveChart(ref *Reference) error {
-	tagDir := filepath.Join(c.CacheRootDir, "refs", ref.Locator, "tags", ref.Object)
-	fmt.Fprintf(c.Out, "Deleting %s\n", ref.String())
-	err := os.RemoveAll(tagDir)
-	return err
-}
 
 // ListCharts lists locally stored charts
 func (c *Client) ListCharts() error {
@@ -72,19 +63,30 @@ func (c *Client) ListCharts() error {
 	return err
 }
 
+// RemoveChart deletes a locally saved chart
+func (c *Client) RemoveChart(ref *Reference) error {
+	fmt.Fprintf(c.Out, "Deleting %s\n", ref.String())
+
+	tagDir := filepath.Join(c.CacheRootDir, "refs", ref.Locator, "tags", ref.Object)
+	err := os.RemoveAll(tagDir)
+	return err
+}
+
 // PushChart uploads a chart to a registry
 func (c *Client) PushChart(ref *Reference) error {
+	fmt.Fprintf(c.Out, "Pushing %s\n", ref.String())
+
 	memoryStore := content.NewMemoryStore()
 	tagDir := filepath.Join(c.CacheRootDir, "refs", ref.Locator, "tags", ref.Object)
 
-	// create meta layer
+	// add meta layer
 	metaJsonRaw, err := getSymlinkDestContent(filepath.Join(tagDir, "meta"))
 	if err != nil {
 		return err
 	}
 	metaLayer := memoryStore.Add(HelmChartMetaFileName, HelmChartMetaMediaType, metaJsonRaw)
 
-	// create content layer
+	// add content layer
 	contentRaw, err := getSymlinkDestContent(filepath.Join(tagDir, "content"))
 	if err != nil {
 		return err
@@ -98,7 +100,6 @@ func (c *Client) PushChart(ref *Reference) error {
 	}
 
 	// initiate push to remote
-	fmt.Fprintf(c.Out, "Pushing %s\nsha256: %s\n", ref.String(), contentLayer.Digest)
 	layers := []ocispec.Descriptor{metaLayer, contentLayer}
 	err = oras.Push(context.Background(), c.Resolver, ref.String(), memoryStore, layers)
 	return err
@@ -106,13 +107,15 @@ func (c *Client) PushChart(ref *Reference) error {
 
 // PullChart downloads a chart from a registry
 func (c *Client) PullChart(ref *Reference) error {
+	fmt.Fprintf(c.Out, "Pulling %s\n", ref.String())
+
 	ctx := context.Background()
 	memoryStore := content.NewMemoryStore()
 
 	// Create directory which will contain nothing but symlinks
 	tagDir := mkdir(filepath.Join(c.CacheRootDir, "refs", ref.Locator, "tags", ref.Object))
 
-	fmt.Fprintf(c.Out, "Pulling %s\n", ref.String())
+	// initiate pull from remote
 	layers, err := oras.Pull(ctx, c.Resolver, ref.String(), memoryStore, KnownMediaTypes()...)
 	if err != nil {
 		return err
@@ -175,6 +178,7 @@ func (c *Client) PullChart(ref *Reference) error {
 
 // SaveChart stores a copy of chart in local cache
 func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
+	fmt.Fprintf(c.Out, "Saving %s\n", ref.String())
 
 	// Create directory which will contain nothing but symlinks
 	tagDir := mkdir(filepath.Join(c.CacheRootDir, "refs", ref.Locator, "tags", ref.Object))
@@ -182,18 +186,15 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 	// extract/separate the name and version from other metadata
 	name := ch.Metadata.Name
 	version := ch.Metadata.Version
-	chartPathDir := filepath.Join(c.CacheRootDir, "charts", name, "versions")
-	chartPath := filepath.Join(chartPathDir, version)
-	if _, err := os.Stat(chartPath); err != nil && os.IsNotExist(err) {
-		os.MkdirAll(chartPathDir, 0755)
-		err := ioutil.WriteFile(chartPath, []byte("-"), 0644)
-		if err != nil {
-			return err
-		}
+
+	// Create chart file
+	chartPath, err := createChartFile(filepath.Join(c.CacheRootDir, "charts"), name, version)
+	if err != nil {
+		return err
 	}
 
 	// Create chart symlink
-	err := createSymlink(chartPath, filepath.Join(tagDir, "chart"))
+	err = createSymlink(chartPath, filepath.Join(tagDir, "chart"))
 	if err != nil {
 		return err
 	}
@@ -207,17 +208,9 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 	}
 
 	// Save meta blob
-	digest := checksum.FromBytes(metaJsonRaw).String()
-	fmt.Fprintf(c.Out, "repo: %s\ntag: %s\ndigest: %s\n", ref.Locator, ref.Object, digest)
-	digestLeft, digestRight := splitDigest(digest)
-	metaPathDir := filepath.Join(c.CacheRootDir, "blobs", "meta", "sha256", digestLeft)
-	metaPath := filepath.Join(metaPathDir, digestRight)
-	if _, err := os.Stat(metaPath); err != nil && os.IsNotExist(err) {
-		os.MkdirAll(metaPathDir, 0755)
-		err := ioutil.WriteFile(metaPath, metaJsonRaw, 0644)
-		if err != nil {
-			return err
-		}
+	metaPath, err := createDigestFile(filepath.Join(c.CacheRootDir, "blobs", "meta"), metaJsonRaw)
+	if err != nil {
+		return err
 	}
 
 	// Create meta symlink
@@ -227,9 +220,11 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 	}
 
 	// Save content blob
+	// TODO: something better than this hack. Currently needed for chartutil.Save()
 	ch.Metadata = &chart.Metadata{Name: "-", Version: "-"}
 	destDir := mkdir(filepath.Join(c.CacheRootDir, "blobs", ".build"))
 	tmpFile, err := chartutil.Save(ch, destDir)
+	defer os.Remove(tmpFile)
 	if err != nil {
 		return errors.Wrap(err, "failed to save")
 	}
@@ -237,18 +232,9 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 	if err != nil {
 		return err
 	}
-	digest = checksum.FromBytes(contentRaw).String()
-	digestLeft, digestRight = splitDigest(digest)
-	contentPathDir := filepath.Join(c.CacheRootDir, "blobs", "content", "sha256", digestLeft)
-	contentPath := filepath.Join(contentPathDir, digestRight)
-	if _, err := os.Stat(contentPath); err != nil && os.IsNotExist(err) {
-		os.MkdirAll(contentPathDir, 0755)
-		err = os.Rename(tmpFile, contentPath)
-		if err != nil {
-			return err
-		}
-	} else {
-		os.Remove(tmpFile)
+	contentPath, err := createDigestFile(filepath.Join(c.CacheRootDir, "blobs", "content"), contentRaw)
+	if err != nil {
+		return err
 	}
 
 	// Create content symlink

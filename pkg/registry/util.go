@@ -30,70 +30,6 @@ import (
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
-// getAllChartRefs returns a map of all refs stored in a refsRootDir
-func getAllChartRefs(refsRootDir string) (map[string]map[string]string, error) {
-	refs := map[string]map[string]string{}
-
-	// Walk the storage dir, check for symlinks under "refs" dir pointing to valid files in "blobs/" and "charts/"
-	err := filepath.Walk(refsRootDir, func(path string, fileInfo os.FileInfo, fileError error) error {
-
-		// Check if this file is a symlink
-		linkPath, err := os.Readlink(path)
-		if err == nil {
-			destFileInfo, err := os.Stat(linkPath)
-			if err == nil {
-				tagDir := filepath.Dir(path)
-
-				// Determine the ref
-				ref := fmt.Sprintf("%s:%s", strings.TrimLeft(
-					strings.TrimPrefix(filepath.Dir(filepath.Dir(tagDir)), refsRootDir), "/\\"),
-					filepath.Base(tagDir))
-
-				// Init hashmap entry if does not exist
-				if _, ok := refs[ref]; !ok {
-					refs[ref] = map[string]string{}
-				}
-
-				// Add data to entry based on file name (symlink name)
-				base := filepath.Base(path)
-				switch base {
-				case "chart":
-					refs[ref]["name"] = filepath.Base(filepath.Dir(filepath.Dir(linkPath)))
-					refs[ref]["version"] = destFileInfo.Name()
-				case "content":
-					shaPrefix := filepath.Base(filepath.Dir(linkPath))
-					digest := fmt.Sprintf("%s%s", shaPrefix, destFileInfo.Name())
-
-					// Make sure the filename looks like a sha256 digest (64 chars)
-					if len(digest) == 64 {
-						refs[ref]["digest"] = digest[:7]
-						refs[ref]["size"] = byteCountBinary(destFileInfo.Size())
-						refs[ref]["created"] = units.HumanDuration(time.Now().UTC().Sub(destFileInfo.ModTime()))
-					}
-				}
-			}
-		}
-
-		return nil
-	})
-
-	// Filter out any refs that are incomplete (do not have all required fields)
-	for k, ref := range refs {
-		allKeysFound := true
-		for _, v := range []string{"name", "version", "digest", "size", "created"} {
-			if _, ok := ref[v]; !ok {
-				allKeysFound = false
-				break
-			}
-		}
-		if !allKeysFound {
-			delete(refs, k)
-		}
-	}
-
-	return refs, err
-}
-
 // createSymlink creates a symbolic link, deleting existing one if exists
 func createSymlink(src string, dest string) error {
 	os.Remove(dest)
@@ -180,6 +116,7 @@ func createChartFile(chartsRootDir string, name string, version string) (string,
 	return chartPath, nil
 }
 
+// createDigestFile calcultaes the sha256 digest of some content and creates a file, returning the path
 func createDigestFile(rootDir string, c []byte) (string, error) {
 	digest := checksum.FromBytes(c).String()
 	digestLeft, digestRight := splitDigest(digest)
@@ -206,6 +143,76 @@ func splitDigest(digest string) (string, string) {
 	return digestLeft, digestRight
 }
 
+// mkdir will create a directory (no error check) and return the path
+func mkdir(dir string) string {
+	os.MkdirAll(dir, 0755)
+	return dir
+}
+
+// getAllChartRefs returns a map of all refs stored in a refsRootDir
+func getAllChartRefs(refsRootDir string) (map[string]map[string]string, error) {
+	refs := map[string]map[string]string{}
+
+	// Walk the storage dir, check for symlinks under "refs" dir pointing to valid files in "blobs/" and "charts/"
+	err := filepath.Walk(refsRootDir, func(path string, fileInfo os.FileInfo, fileError error) error {
+
+		// Check if this file is a symlink
+		linkPath, err := os.Readlink(path)
+		if err == nil {
+			destFileInfo, err := os.Stat(linkPath)
+			if err == nil {
+				tagDir := filepath.Dir(path)
+
+				// Determine the ref
+				ref := fmt.Sprintf("%s:%s", strings.TrimLeft(
+					strings.TrimPrefix(filepath.Dir(filepath.Dir(tagDir)), refsRootDir), "/\\"),
+					filepath.Base(tagDir))
+
+				// Init hashmap entry if does not exist
+				if _, ok := refs[ref]; !ok {
+					refs[ref] = map[string]string{}
+				}
+
+				// Add data to entry based on file name (symlink name)
+				base := filepath.Base(path)
+				switch base {
+				case "chart":
+					refs[ref]["name"] = filepath.Base(filepath.Dir(filepath.Dir(linkPath)))
+					refs[ref]["version"] = destFileInfo.Name()
+				case "content":
+					shaPrefix := filepath.Base(filepath.Dir(linkPath))
+					digest := fmt.Sprintf("%s%s", shaPrefix, destFileInfo.Name())
+
+					// Make sure the filename looks like a sha256 digest (64 chars)
+					if len(digest) == 64 {
+						refs[ref]["digest"] = digest[:7]
+						refs[ref]["size"] = byteCountBinary(destFileInfo.Size())
+						refs[ref]["created"] = units.HumanDuration(time.Now().UTC().Sub(destFileInfo.ModTime()))
+					}
+				}
+			}
+		}
+
+		return nil
+	})
+
+	// Filter out any refs that are incomplete (do not have all required fields)
+	for k, ref := range refs {
+		allKeysFound := true
+		for _, v := range []string{"name", "version", "digest", "size", "created"} {
+			if _, ok := ref[v]; !ok {
+				allKeysFound = false
+				break
+			}
+		}
+		if !allKeysFound {
+			delete(refs, k)
+		}
+	}
+
+	return refs, err
+}
+
 // byteCountBinary produces a human-readable file size
 func byteCountBinary(b int64) string {
 	const unit = 1024
@@ -218,10 +225,4 @@ func byteCountBinary(b int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
-}
-
-// mkdir will create a directory (no error check) and return the path
-func mkdir(dir string) string {
-	os.MkdirAll(dir, 0755)
-	return dir
 }
