@@ -46,75 +46,6 @@ type (
 	}
 )
 
-// ListCharts lists locally stored charts
-func (c *Client) ListCharts() error {
-	table := uitable.New()
-	table.MaxColWidth = 60
-	table.AddRow("REF", "NAME", "VERSION", "DIGEST", "SIZE", "CREATED")
-
-	refs, err := getRefsSorted(filepath.Join(c.CacheRootDir, "refs"))
-	if err != nil {
-		return err
-	}
-
-	for _, ref := range refs {
-		table.AddRow(ref["ref"], ref["name"], ref["version"], ref["digest"], ref["size"], ref["created"])
-	}
-
-	_, err = fmt.Fprintln(c.Out, table.String())
-	return err
-}
-
-// LoadChart loads a chart by reference
-func (c *Client) LoadChart(ref *Reference) (*chart.Chart, error) {
-	tagDir := filepath.Join(c.CacheRootDir, "refs", ref.Locator, "tags", ref.Object)
-
-	// Get chart name and version
-	name, version, err := extractChartNameVersionFromRef(filepath.Join(c.CacheRootDir, "refs"), ref)
-	if err != nil {
-		return nil, err
-	}
-
-	// Obtain raw chart meta content (json)
-	metaJsonRaw, err := getSymlinkDestContent(filepath.Join(tagDir, "meta"))
-	if err != nil {
-		return nil, err
-	}
-
-	// Construct chart metadata object
-	metadata := chart.Metadata{}
-	err = json.Unmarshal(metaJsonRaw, &metadata)
-	if err != nil {
-		return nil, err
-	}
-	metadata.Name = name
-	metadata.Version = version
-
-	// Obtain raw chart content
-	contentRaw, err := getSymlinkDestContent(filepath.Join(tagDir, "content"))
-	if err != nil {
-		return nil, err
-	}
-
-	// Construct chart object and attach metadata
-	ch, err := loader.LoadArchive(bytes.NewBuffer(contentRaw))
-	if err != nil {
-		return nil, err
-	}
-	ch.Metadata = &metadata
-
-	return ch, nil
-}
-
-// RemoveChart deletes a locally saved chart
-func (c *Client) RemoveChart(ref *Reference) error {
-	fmt.Fprintf(c.Out, "Deleting %s\n", ref.String())
-
-	tagDir := filepath.Join(c.CacheRootDir, "refs", ref.Locator, "tags", ref.Object)
-	err := os.RemoveAll(tagDir)
-	return err
-}
-
 // PushChart uploads a chart to a registry
 func (c *Client) PushChart(ref *Reference) error {
 	fmt.Fprintf(c.Out, "Pushing %s\n", ref.String())
@@ -283,4 +214,73 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 	// Create content symlink
 	err = createSymlink(contentPath, filepath.Join(tagDir, "content"))
 	return err
+}
+
+// LoadChart loads a chart by reference
+func (c *Client) LoadChart(ref *Reference) (*chart.Chart, error) {
+	tagDir := filepath.Join(c.CacheRootDir, "refs", ref.Locator, "tags", ref.Object)
+
+	// Get chart name and version
+	name, version, err := extractChartNameVersionFromRef(filepath.Join(c.CacheRootDir, "refs"), ref)
+	if err != nil {
+		return nil, err
+	}
+
+	// Obtain raw chart meta content (json)
+	metaJsonRaw, err := getSymlinkDestContent(filepath.Join(tagDir, "meta"))
+	if err != nil {
+		return nil, err
+	}
+
+	// Construct chart metadata object
+	metadata := chart.Metadata{}
+	err = json.Unmarshal(metaJsonRaw, &metadata)
+	if err != nil {
+		return nil, err
+	}
+	metadata.Name = name
+	metadata.Version = version
+
+	// Obtain raw chart content
+	contentRaw, err := getSymlinkDestContent(filepath.Join(tagDir, "content"))
+	if err != nil {
+		return nil, err
+	}
+
+	// Construct chart object and attach metadata
+	ch, err := loader.LoadArchive(bytes.NewBuffer(contentRaw))
+	if err != nil {
+		return nil, err
+	}
+	ch.Metadata = &metadata
+
+	return ch, nil
+}
+
+// RemoveChart deletes a locally saved chart
+func (c *Client) RemoveChart(ref *Reference) error {
+	fmt.Fprintf(c.Out, "Deleting %s\n", ref.String())
+
+	tagDir := filepath.Join(c.CacheRootDir, "refs", ref.Locator, "tags", ref.Object)
+	err := os.RemoveAll(tagDir)
+	return err
+}
+
+// PrintChartTable prints a list of locally stored charts
+func (c *Client) PrintChartTable() error {
+	table := uitable.New()
+	table.MaxColWidth = 60
+	table.AddRow("REF", "NAME", "VERSION", "DIGEST", "SIZE", "CREATED")
+
+	refs, err := getRefsSorted(filepath.Join(c.CacheRootDir, "refs"))
+	if err != nil {
+		return err
+	}
+
+	for _, ref := range refs {
+		table.AddRow(ref["ref"], ref["name"], ref["version"], ref["digest"], ref["size"], ref["created"])
+	}
+
+	fmt.Fprintln(c.Out, table.String())
+	return nil
 }

@@ -30,5 +30,5 @@ func NewChartList(cfg *Configuration) *ChartList {
 
 // Run executes the chart list operation
 func (a *ChartList) Run() error {
-	return a.cfg.RegistryClient.ListCharts()
+	return a.cfg.RegistryClient.PrintChartTable()
 }
