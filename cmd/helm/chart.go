@@ -38,6 +38,7 @@ func newChartCmd(cfg *action.Configuration) *cobra.Command {
 	}
 	cmd.AddCommand(
 		newChartListCmd(cfg),
+		newChartExportCmd(cfg),
 		newChartPullCmd(cfg),
 		newChartPushCmd(cfg),
 		newChartRemoveCmd(cfg),

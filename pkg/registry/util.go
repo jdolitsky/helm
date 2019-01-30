@@ -90,8 +90,8 @@ func extractLayers(layers []ocispec.Descriptor) (ocispec.Descriptor, ocispec.Des
 	return metaLayer, contentLayer, nil
 }
 
-// extractChartNameVersion retrieves the chart name and version from layer annotations
-func extractChartNameVersion(layer ocispec.Descriptor) (string, string, error) {
+// extractChartNameVersionFromLayer retrieves the chart name and version from layer annotations
+func extractChartNameVersionFromLayer(layer ocispec.Descriptor) (string, string, error) {
 	name, ok := layer.Annotations[HelmChartNameAnnotation]
 	if !ok {
 		return "", "", errors.New("could not find chart name in annotations")
@@ -100,6 +100,17 @@ func extractChartNameVersion(layer ocispec.Descriptor) (string, string, error) {
 	if !ok {
 		return "", "", errors.New("could not find chart version in annotations")
 	}
+	return name, version, nil
+}
+
+// extractChartNameVersionFromRef retrieves the chart name and version from a Reference
+func extractChartNameVersionFromRef(refsRootDir string, ref *Reference) (string, string, error) {
+	chartPath, err := os.Readlink(filepath.Join(refsRootDir, ref.Locator, "tags", ref.Object, "chart"))
+	if err != nil {
+		return "", "", nil
+	}
+	name := filepath.Base(filepath.Dir(filepath.Dir(chartPath)))
+	version := filepath.Base(chartPath)
 	return name, version, nil
 }
 

@@ -17,6 +17,7 @@ limitations under the License.
 package registry // import "k8s.io/helm/pkg/registry"
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -32,6 +33,7 @@ import (
 	"github.com/pkg/errors"
 
 	"k8s.io/helm/pkg/chart"
+	"k8s.io/helm/pkg/chart/loader"
 	"k8s.io/helm/pkg/chartutil"
 )
 
@@ -61,6 +63,47 @@ func (c *Client) ListCharts() error {
 
 	_, err = fmt.Fprintln(c.Out, table.String())
 	return err
+}
+
+// LoadChart loads a chart by reference
+func (c *Client) LoadChart(ref *Reference) (*chart.Chart, error) {
+	tagDir := filepath.Join(c.CacheRootDir, "refs", ref.Locator, "tags", ref.Object)
+
+	// Get chart name and version
+	name, version, err := extractChartNameVersionFromRef(filepath.Join(c.CacheRootDir, "refs"), ref)
+	if err != nil {
+		return nil, err
+	}
+
+	// Obtain raw chart meta content (json)
+	metaJsonRaw, err := getSymlinkDestContent(filepath.Join(tagDir, "meta"))
+	if err != nil {
+		return nil, err
+	}
+
+	// Construct chart metadata object
+	metadata := chart.Metadata{}
+	err = json.Unmarshal(metaJsonRaw, &metadata)
+	if err != nil {
+		return nil, err
+	}
+	metadata.Name = name
+	metadata.Version = version
+
+	// Obtain raw chart content
+	contentRaw, err := getSymlinkDestContent(filepath.Join(tagDir, "content"))
+	if err != nil {
+		return nil, err
+	}
+
+	// Construct chart object and attach metadata
+	ch, err := loader.LoadArchive(bytes.NewBuffer(contentRaw))
+	if err != nil {
+		return nil, err
+	}
+	ch.Metadata = &metadata
+
+	return ch, nil
 }
 
 // RemoveChart deletes a locally saved chart
@@ -128,7 +171,7 @@ func (c *Client) PullChart(ref *Reference) error {
 	}
 
 	// Extract chart name and version
-	name, version, err := extractChartNameVersion(contentLayer)
+	name, version, err := extractChartNameVersionFromLayer(contentLayer)
 	if err != nil {
 		return err
 	}
