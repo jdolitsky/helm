@@ -46,7 +46,7 @@ type Configuration struct {
 	KubeClient environment.KubeClient
 
 	// RegistryClient is a client for working with registries
-	RegistryClient registry.Client
+	RegistryClient *registry.Client
 
 	Capabilities *chartutil.Capabilities
 

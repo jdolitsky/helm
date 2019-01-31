@@ -70,15 +70,13 @@ func newRootCmd(c helm.Interface, actionConfig *action.Configuration, out io.Wri
 
 	// Add the registry client based on settings
 	// TODO: Move this elsewhere (first, settings.Init() must move)
-	resolver := registry.Resolver{
-		Resolver: docker.NewResolver(docker.ResolverOptions{}),
-	}
-	registryClient := registry.Client{
+	actionConfig.RegistryClient = registry.NewClient(&registry.ClientOptions{
+		Out: out,
+		Resolver: registry.Resolver{
+			Resolver: docker.NewResolver(docker.ResolverOptions{}),
+		},
 		CacheRootDir: settings.Home.Registry(),
-		Out:          out,
-		Resolver:     resolver,
-	}
-	actionConfig.RegistryClient = registryClient
+	})
 
 	cmd.AddCommand(
 		// chart commands

@@ -20,7 +20,7 @@ const (
 	// HelmChartMetaMediaType is the reserved media type for Helm chart metadata
 	HelmChartMetaMediaType = "application/vnd.cncf.helm.chart.meta.v1+json"
 
-	// HelmChartPackageMediaType is the reserved media type for Helm chart package content
+	// HelmChartContentMediaType is the reserved media type for Helm chart package content
 	HelmChartContentMediaType = "application/vnd.cncf.helm.chart.content.v1+tar"
 
 	// HelmChartMetaFileName is the reserved file name for Helm chart metadata
@@ -30,10 +30,10 @@ const (
 	HelmChartContentFileName = "chart-content.tgz"
 
 	// HelmChartNameAnnotation is the reserved annotation key for Helm chart name
-	HelmChartNameAnnotation = "chart.name"
+	HelmChartNameAnnotation = "sh.helm.chart.name"
 
 	// HelmChartVersionAnnotation is the reserved annotation key for Helm chart version
-	HelmChartVersionAnnotation = "chart.version"
+	HelmChartVersionAnnotation = "sh.helm.chart.version"
 )
 
 // KnownMediaTypes returns a list of layer mediaTypes that the Helm client knows about

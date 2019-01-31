@@ -17,8 +17,10 @@ limitations under the License.
 package registry // import "k8s.io/helm/pkg/registry"
 
 import (
-	"errors"
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -26,10 +28,203 @@ import (
 	"strings"
 	"time"
 
+	orascontent "github.com/deislabs/oras/pkg/content"
 	"github.com/docker/go-units"
 	checksum "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/pkg/errors"
+
+	"k8s.io/helm/pkg/chart"
+	"k8s.io/helm/pkg/chart/loader"
+	"k8s.io/helm/pkg/chartutil"
 )
+
+type (
+	simpleFilesystemCache struct {
+		out     io.Writer
+		rootDir string
+		store   *orascontent.Memorystore
+	}
+)
+
+func (cache *simpleFilesystemCache) ConvertLayersToChart(layers []ocispec.Descriptor) (*chart.Chart, error) {
+	metaLayer, contentLayer, err := extractLayers(layers)
+	if err != nil {
+		return nil, err
+	}
+
+	name, version, err := extractChartNameVersionFromLayer(contentLayer)
+	if err != nil {
+		return nil, err
+	}
+
+	// Obtain raw chart meta content (json)
+	_, metaJSONRaw, ok := cache.store.Get(metaLayer)
+	if !ok {
+		return nil, errors.New("error retrieving meta layer")
+	}
+
+	// Construct chart metadata object
+	metadata := chart.Metadata{}
+	err = json.Unmarshal(metaJSONRaw, &metadata)
+	if err != nil {
+		return nil, err
+	}
+	metadata.Name = name
+	metadata.Version = version
+
+	// Obtain raw chart content
+	_, contentRaw, ok := cache.store.Get(contentLayer)
+	if !ok {
+		return nil, errors.New("error retrieving meta layer")
+	}
+
+	// Construct chart object and attach metadata
+	ch, err := loader.LoadArchive(bytes.NewBuffer(contentRaw))
+	if err != nil {
+		return nil, err
+	}
+	ch.Metadata = &metadata
+
+	return ch, nil
+}
+
+func (cache *simpleFilesystemCache) ConvertChartToLayers(ch *chart.Chart) ([]ocispec.Descriptor, error) {
+
+	// extract/separate the name and version from other metadata
+	name := ch.Metadata.Name
+	version := ch.Metadata.Version
+
+	// Create meta layer, clear name and version from Chart.yaml and convert to json
+	ch.Metadata.Name = ""
+	ch.Metadata.Version = ""
+	metaJSONRaw, err := json.Marshal(ch.Metadata)
+	if err != nil {
+		return nil, err
+	}
+	metaLayer := cache.store.Add(HelmChartMetaFileName, HelmChartMetaMediaType, metaJSONRaw)
+
+	// Create content layer
+	// TODO: something better than this hack. Currently needed for chartutil.Save()
+	ch.Metadata = &chart.Metadata{Name: "-", Version: "-"}
+	destDir := mkdir(filepath.Join(cache.rootDir, "blobs", ".build"))
+	tmpFile, err := chartutil.Save(ch, destDir)
+	defer os.Remove(tmpFile)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to save")
+	}
+	contentRaw, err := ioutil.ReadFile(tmpFile)
+	if err != nil {
+		return nil, err
+	}
+	contentLayer := cache.store.Add(HelmChartContentFileName, HelmChartContentMediaType, contentRaw)
+
+	// Set annotations
+	contentLayer.Annotations[HelmChartNameAnnotation] = name
+	contentLayer.Annotations[HelmChartVersionAnnotation] = version
+
+	layers := []ocispec.Descriptor{metaLayer, contentLayer}
+	return layers, nil
+}
+
+func (cache *simpleFilesystemCache) LoadReference(ref *Reference) ([]ocispec.Descriptor, error) {
+	tagDir := filepath.Join(cache.rootDir, "refs", ref.Locator, "tags", ref.Object)
+
+	// add meta layer
+	metaJSONRaw, err := getSymlinkDestContent(filepath.Join(tagDir, "meta"))
+	if err != nil {
+		return nil, err
+	}
+	metaLayer := cache.store.Add(HelmChartMetaFileName, HelmChartMetaMediaType, metaJSONRaw)
+
+	// add content layer
+	contentRaw, err := getSymlinkDestContent(filepath.Join(tagDir, "content"))
+	if err != nil {
+		return nil, err
+	}
+	contentLayer := cache.store.Add(HelmChartContentFileName, HelmChartContentMediaType, contentRaw)
+
+	// set annotations on content layer (chart name and version)
+	err = setLayerAnnotationsFromChartLink(contentLayer, filepath.Join(tagDir, "chart"))
+	if err != nil {
+		return nil, err
+	}
+
+	layers := []ocispec.Descriptor{metaLayer, contentLayer}
+	return layers, nil
+}
+
+func (cache *simpleFilesystemCache) StoreReference(ref *Reference, layers []ocispec.Descriptor) error {
+	tagDir := mkdir(filepath.Join(cache.rootDir, "refs", ref.Locator, "tags", ref.Object))
+
+	// Retrieve just the meta and content layers
+	metaLayer, contentLayer, err := extractLayers(layers)
+	if err != nil {
+		return err
+	}
+
+	// Extract chart name and version
+	name, version, err := extractChartNameVersionFromLayer(contentLayer)
+	if err != nil {
+		return err
+	}
+
+	// Create chart file
+	chartPath, err := createChartFile(filepath.Join(cache.rootDir, "charts"), name, version)
+	if err != nil {
+		return err
+	}
+
+	// Create chart symlink
+	err = createSymlink(chartPath, filepath.Join(tagDir, "chart"))
+	if err != nil {
+		return err
+	}
+
+	// Save meta blob
+	_, metaJSONRaw, ok := cache.store.Get(metaLayer)
+	if !ok {
+		return errors.New("error retrieving meta layer")
+	}
+	metaPath, err := createDigestFile(filepath.Join(cache.rootDir, "blobs", "meta"), metaJSONRaw)
+	if err != nil {
+		return err
+	}
+
+	// Create meta symlink
+	err = createSymlink(metaPath, filepath.Join(tagDir, "meta"))
+	if err != nil {
+		return err
+	}
+
+	// Save content blob
+	_, contentRaw, ok := cache.store.Get(contentLayer)
+	if !ok {
+		return errors.New("error retrieving content layer")
+	}
+	contentPath, err := createDigestFile(filepath.Join(cache.rootDir, "blobs", "content"), contentRaw)
+	if err != nil {
+		return err
+	}
+
+	// Create content symlink
+	return createSymlink(contentPath, filepath.Join(tagDir, "content"))
+}
+
+func (cache *simpleFilesystemCache) DeleteReference(ref *Reference) error {
+	tagDir := filepath.Join(cache.rootDir, "refs", ref.Locator, "tags", ref.Object)
+	return os.RemoveAll(tagDir)
+}
+
+func (cache *simpleFilesystemCache) TableRows() ([][]string, error) {
+	return getRefsSorted(filepath.Join(cache.rootDir, "refs"))
+}
+
+// mkdir will create a directory (no error check) and return the path
+func mkdir(dir string) string {
+	os.MkdirAll(dir, 0755)
+	return dir
+}
 
 // createSymlink creates a symbolic link, deleting existing one if exists
 func createSymlink(src string, dest string) error {
@@ -103,17 +298,6 @@ func extractChartNameVersionFromLayer(layer ocispec.Descriptor) (string, string,
 	return name, version, nil
 }
 
-// extractChartNameVersionFromRef retrieves the chart name and version from a Reference
-func extractChartNameVersionFromRef(refsRootDir string, ref *Reference) (string, string, error) {
-	chartPath, err := os.Readlink(filepath.Join(refsRootDir, ref.Locator, "tags", ref.Object, "chart"))
-	if err != nil {
-		return "", "", nil
-	}
-	name := filepath.Base(filepath.Dir(filepath.Dir(chartPath)))
-	version := filepath.Base(chartPath)
-	return name, version, nil
-}
-
 // createChartFile creates a file under "<chartsdir>" dir which is linked to by ref
 func createChartFile(chartsRootDir string, name string, version string) (string, error) {
 	chartPathDir := filepath.Join(chartsRootDir, name, "versions")
@@ -155,14 +339,22 @@ func splitDigest(digest string) (string, string) {
 	return digestLeft, digestRight
 }
 
-// mkdir will create a directory (no error check) and return the path
-func mkdir(dir string) string {
-	os.MkdirAll(dir, 0755)
-	return dir
+// byteCountBinary produces a human-readable file size
+func byteCountBinary(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
 // getRefsSorted returns a map of all refs stored in a refsRootDir
-func getRefsSorted(refsRootDir string) ([]map[string]string, error) {
+func getRefsSorted(refsRootDir string) ([][]string, error) {
 	refsMap := map[string]map[string]string{}
 
 	// Walk the storage dir, check for symlinks under "refs" dir pointing to valid files in "blobs/" and "charts/"
@@ -222,8 +414,8 @@ func getRefsSorted(refsRootDir string) ([]map[string]string, error) {
 		}
 	}
 
-	// Sort and convert to slice
-	var refs []map[string]string
+	// Sort and convert to slice of slices
+	var refs [][]string
 	keys := make([]string, 0, len(refsMap))
 	for key := range refsMap {
 		keys = append(keys, key)
@@ -232,22 +424,8 @@ func getRefsSorted(refsRootDir string) ([]map[string]string, error) {
 	for _, key := range keys {
 		ref := refsMap[key]
 		ref["ref"] = key
-		refs = append(refs, ref)
+		refs = append(refs, []string{key, ref["name"], ref["version"], ref["digest"], ref["size"], ref["created"]})
 	}
 
 	return refs, err
-}
-
-// byteCountBinary produces a human-readable file size
-func byteCountBinary(b int64) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
 }

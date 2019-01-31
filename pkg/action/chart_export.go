@@ -17,10 +17,8 @@ limitations under the License.
 package action
 
 import (
-	"fmt"
 	"io/ioutil"
 	"os"
-	"path/filepath"
 
 	"k8s.io/helm/pkg/chartutil"
 	"k8s.io/helm/pkg/registry"
@@ -51,7 +49,8 @@ func (a *ChartExport) Run(ref string) error {
 	}
 
 	// Save the chart to local directory
-	tempDirPrefix := filepath.Join(a.cfg.RegistryClient.CacheRootDir, ".export")
+	// TODO: init in Helm home? Or no file creation at all?
+	tempDirPrefix := ".helm-chart-export"
 	os.MkdirAll(tempDirPrefix, 0755)
 	tempDir, err := ioutil.TempDir(tempDirPrefix, "")
 	if err != nil {
@@ -66,7 +65,6 @@ func (a *ChartExport) Run(ref string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(a.cfg.RegistryClient.Out, "Exported to %s/\n", ch.Metadata.Name)
 
 	return nil
 }
