@@ -40,7 +40,7 @@ type (
 	Client struct {
 		out      io.Writer
 		resolver Resolver
-		cache    *simpleFilesystemCache
+		cache    *filesystemCache // TODO: something more robust
 	}
 )
 
@@ -49,7 +49,7 @@ func NewClient(options *ClientOptions) *Client {
 	return &Client{
 		out:      options.Out,
 		resolver: options.Resolver,
-		cache: &simpleFilesystemCache{
+		cache: &filesystemCache{
 			out:     options.Out,
 			rootDir: options.CacheRootDir,
 			store:   orascontent.NewMemoryStore(),
@@ -79,7 +79,7 @@ func (c *Client) PullChart(ref *Reference) error {
 
 // SaveChart stores a copy of chart in local cache
 func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
-	layers, err := c.cache.ConvertChartToLayers(ch)
+	layers, err := c.cache.ChartToLayers(ch)
 	if err != nil {
 		return err
 	}
@@ -93,7 +93,7 @@ func (c *Client) LoadChart(ref *Reference) (*chart.Chart, error) {
 	if err != nil {
 		return nil, err
 	}
-	ch, err := c.cache.ConvertLayersToChart(layers)
+	ch, err := c.cache.LayersToChart(layers)
 	return ch, err
 }
 

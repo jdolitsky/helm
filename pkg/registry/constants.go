@@ -17,6 +17,9 @@ limitations under the License.
 package registry // import "k8s.io/helm/pkg/registry"
 
 const (
+	// HelmChartDefaultTag is the default tag used when storing a chart reference with no tag
+	HelmChartDefaultTag = "latest"
+
 	// HelmChartMetaMediaType is the reserved media type for Helm chart metadata
 	HelmChartMetaMediaType = "application/vnd.cncf.helm.chart.meta.v1+json"
 

@@ -40,14 +40,14 @@ import (
 )
 
 type (
-	simpleFilesystemCache struct {
+	filesystemCache struct {
 		out     io.Writer
 		rootDir string
 		store   *orascontent.Memorystore
 	}
 )
 
-func (cache *simpleFilesystemCache) ConvertLayersToChart(layers []ocispec.Descriptor) (*chart.Chart, error) {
+func (cache *filesystemCache) LayersToChart(layers []ocispec.Descriptor) (*chart.Chart, error) {
 	metaLayer, contentLayer, err := extractLayers(layers)
 	if err != nil {
 		return nil, err
@@ -89,7 +89,7 @@ func (cache *simpleFilesystemCache) ConvertLayersToChart(layers []ocispec.Descri
 	return ch, nil
 }
 
-func (cache *simpleFilesystemCache) ConvertChartToLayers(ch *chart.Chart) ([]ocispec.Descriptor, error) {
+func (cache *filesystemCache) ChartToLayers(ch *chart.Chart) ([]ocispec.Descriptor, error) {
 
 	// extract/separate the name and version from other metadata
 	name := ch.Metadata.Name
@@ -127,8 +127,8 @@ func (cache *simpleFilesystemCache) ConvertChartToLayers(ch *chart.Chart) ([]oci
 	return layers, nil
 }
 
-func (cache *simpleFilesystemCache) LoadReference(ref *Reference) ([]ocispec.Descriptor, error) {
-	tagDir := filepath.Join(cache.rootDir, "refs", ref.Locator, "tags", ref.Object)
+func (cache *filesystemCache) LoadReference(ref *Reference) ([]ocispec.Descriptor, error) {
+	tagDir := filepath.Join(cache.rootDir, "refs", ref.Locator, "tags", tagOrDefault(ref.Object))
 
 	// add meta layer
 	metaJSONRaw, err := getSymlinkDestContent(filepath.Join(tagDir, "meta"))
@@ -154,8 +154,8 @@ func (cache *simpleFilesystemCache) LoadReference(ref *Reference) ([]ocispec.Des
 	return layers, nil
 }
 
-func (cache *simpleFilesystemCache) StoreReference(ref *Reference, layers []ocispec.Descriptor) error {
-	tagDir := mkdir(filepath.Join(cache.rootDir, "refs", ref.Locator, "tags", ref.Object))
+func (cache *filesystemCache) StoreReference(ref *Reference, layers []ocispec.Descriptor) error {
+	tagDir := mkdir(filepath.Join(cache.rootDir, "refs", ref.Locator, "tags", tagOrDefault(ref.Object)))
 
 	// Retrieve just the meta and content layers
 	metaLayer, contentLayer, err := extractLayers(layers)
@@ -211,12 +211,12 @@ func (cache *simpleFilesystemCache) StoreReference(ref *Reference, layers []ocis
 	return createSymlink(contentPath, filepath.Join(tagDir, "content"))
 }
 
-func (cache *simpleFilesystemCache) DeleteReference(ref *Reference) error {
-	tagDir := filepath.Join(cache.rootDir, "refs", ref.Locator, "tags", ref.Object)
+func (cache *filesystemCache) DeleteReference(ref *Reference) error {
+	tagDir := filepath.Join(cache.rootDir, "refs", ref.Locator, "tags", tagOrDefault(ref.Object))
 	return os.RemoveAll(tagDir)
 }
 
-func (cache *simpleFilesystemCache) TableRows() ([][]string, error) {
+func (cache *filesystemCache) TableRows() ([][]string, error) {
 	return getRefsSorted(filepath.Join(cache.rootDir, "refs"))
 }
 
@@ -353,6 +353,14 @@ func byteCountBinary(b int64) string {
 	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
+// tagOrDefault returns the tag if present, if not the default tag
+func tagOrDefault(tag string) string {
+	if tag != "" {
+		return tag
+	}
+	return HelmChartDefaultTag
+}
+
 // getRefsSorted returns a map of all refs stored in a refsRootDir
 func getRefsSorted(refsRootDir string) ([][]string, error) {
 	refsMap := map[string]map[string]string{}
@@ -368,9 +376,10 @@ func getRefsSorted(refsRootDir string) ([][]string, error) {
 				tagDir := filepath.Dir(path)
 
 				// Determine the ref
-				ref := fmt.Sprintf("%s:%s", strings.TrimLeft(
-					strings.TrimPrefix(filepath.Dir(filepath.Dir(tagDir)), refsRootDir), "/\\"),
-					filepath.Base(tagDir))
+				locator := strings.TrimLeft(
+					strings.TrimPrefix(filepath.Dir(filepath.Dir(tagDir)), refsRootDir), "/\\")
+				object := filepath.Base(tagDir)
+				ref := fmt.Sprintf("%s:%s", locator, object)
 
 				// Init hashmap entry if does not exist
 				if _, ok := refsMap[ref]; !ok {
