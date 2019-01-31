@@ -17,31 +17,46 @@ limitations under the License.
 package registry
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"k8s.io/helm/pkg/chart"
 	"net"
+	"os"
 	"testing"
 	"time"
 
-	"github.com/containerd/containerd/remotes"
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/docker/distribution/configuration"
 	"github.com/docker/distribution/registry"
 	_ "github.com/docker/distribution/registry/storage/driver/inmemory"
-
-	//ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	//orascontent "github.com/deislabs/oras/pkg/content"
 
 	"github.com/stretchr/testify/suite"
 )
 
 type RegistryClientTestSuite struct {
 	suite.Suite
+	Out                io.Writer
 	DockerRegistryHost string
 	RegistryClient     *Client
 }
 
 func (suite *RegistryClientTestSuite) SetupSuite() {
+	os.RemoveAll("helm-registry-test")
+
+	// Init test client
+	var out bytes.Buffer
+	suite.Out = &out
+	suite.RegistryClient = NewClient(&ClientOptions{
+		Out: suite.Out,
+		Resolver: Resolver{
+			Resolver: docker.NewResolver(docker.ResolverOptions{}),
+		},
+		CacheRootDir: "helm-registry-test",
+	})
+
+	// Registry config
 	config := &configuration.Configuration{}
 	port, err := getFreePort()
 	if err != nil {
@@ -58,16 +73,93 @@ func (suite *RegistryClientTestSuite) SetupSuite() {
 	go dockerRegistry.ListenAndServe()
 }
 
+func (suite *RegistryClientTestSuite) Test_0_SaveChart() {
+	ref, err := ParseReference(fmt.Sprintf("%s/testrepo/testchart:1.2.3", suite.DockerRegistryHost))
+	suite.Nil(err)
+
+	// empty chart
+	err = suite.RegistryClient.SaveChart(&chart.Chart{}, ref)
+	suite.NotNil(err)
+
+	// valid chart
+	ch := &chart.Chart{}
+	ch.Metadata = &chart.Metadata{
+		Name:    "testchart",
+		Version: "1.2.3",
+	}
+	err = suite.RegistryClient.SaveChart(ch, ref)
+	suite.Nil(err)
+}
+
+func (suite *RegistryClientTestSuite) Test_1_LoadChart() {
+
+	// non-existent ref
+	ref, err := ParseReference(fmt.Sprintf("%s/testrepo/whodis:9.9.9", suite.DockerRegistryHost))
+	suite.Nil(err)
+	ch, err := suite.RegistryClient.LoadChart(ref)
+	suite.NotNil(err)
+
+	// existing ref
+	ref, err = ParseReference(fmt.Sprintf("%s/testrepo/testchart:1.2.3", suite.DockerRegistryHost))
+	suite.Nil(err)
+	ch, err = suite.RegistryClient.LoadChart(ref)
+	suite.Nil(err)
+	suite.Equal("testchart", ch.Metadata.Name)
+	suite.Equal("1.2.3", ch.Metadata.Version)
+}
+
+func (suite *RegistryClientTestSuite) Test_2_PushChart() {
+
+	// non-existent ref
+	ref, err := ParseReference(fmt.Sprintf("%s/testrepo/whodis:9.9.9", suite.DockerRegistryHost))
+	suite.Nil(err)
+	err = suite.RegistryClient.PushChart(ref)
+	suite.NotNil(err)
+
+	// existing ref
+	ref, err = ParseReference(fmt.Sprintf("%s/testrepo/testchart:1.2.3", suite.DockerRegistryHost))
+	suite.Nil(err)
+	err = suite.RegistryClient.PushChart(ref)
+	suite.Nil(err)
+}
+
+func (suite *RegistryClientTestSuite) Test_3_PullChart() {
+
+	// non-existent ref
+	ref, err := ParseReference(fmt.Sprintf("%s/testrepo/whodis:9.9.9", suite.DockerRegistryHost))
+	suite.Nil(err)
+	err = suite.RegistryClient.PullChart(ref)
+	suite.NotNil(err)
+
+	// existing ref
+	ref, err = ParseReference(fmt.Sprintf("%s/testrepo/testchart:1.2.3", suite.DockerRegistryHost))
+	suite.Nil(err)
+	err = suite.RegistryClient.PullChart(ref)
+	suite.Nil(err)
+}
+
+func (suite *RegistryClientTestSuite) Test_4_PrintChartTable() {
+	err := suite.RegistryClient.PrintChartTable()
+	suite.Nil(err)
+}
+
+func (suite *RegistryClientTestSuite) Test_5_RemoveChart() {
+
+	// non-existent ref
+	ref, err := ParseReference(fmt.Sprintf("%s/testrepo/whodis:9.9.9", suite.DockerRegistryHost))
+	suite.Nil(err)
+	err = suite.RegistryClient.RemoveChart(ref)
+	suite.NotNil(err)
+
+	// existing ref
+	ref, err = ParseReference(fmt.Sprintf("%s/testrepo/testchart:1.2.3", suite.DockerRegistryHost))
+	suite.Nil(err)
+	err = suite.RegistryClient.RemoveChart(ref)
+	suite.Nil(err)
+}
+
 func TestRegistryClientTestSuite(t *testing.T) {
 	suite.Run(t, new(RegistryClientTestSuite))
-}
-
-func newContext() context.Context {
-	return context.Background()
-}
-
-func newResolver() remotes.Resolver {
-	return docker.NewResolver(docker.ResolverOptions{})
 }
 
 // borrowed from https://github.com/phayes/freeport

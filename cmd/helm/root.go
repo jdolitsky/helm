@@ -17,15 +17,15 @@ limitations under the License.
 package main // import "k8s.io/helm/cmd/helm"
 
 import (
-	"github.com/containerd/containerd/remotes/docker"
 	"io"
-	"k8s.io/helm/pkg/registry"
 
+	"github.com/containerd/containerd/remotes/docker"
 	"github.com/spf13/cobra"
 
 	"k8s.io/helm/cmd/helm/require"
 	"k8s.io/helm/pkg/action"
 	"k8s.io/helm/pkg/helm"
+	"k8s.io/helm/pkg/registry"
 )
 
 var globalUsage = `The Kubernetes package manager

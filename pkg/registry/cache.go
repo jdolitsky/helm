@@ -92,6 +92,9 @@ func (cache *filesystemCache) LayersToChart(layers []ocispec.Descriptor) (*chart
 func (cache *filesystemCache) ChartToLayers(ch *chart.Chart) ([]ocispec.Descriptor, error) {
 
 	// extract/separate the name and version from other metadata
+	if ch.Metadata == nil {
+		return nil, errors.New("chart does not contain metadata")
+	}
 	name := ch.Metadata.Name
 	version := ch.Metadata.Version
 
@@ -213,6 +216,9 @@ func (cache *filesystemCache) StoreReference(ref *Reference, layers []ocispec.De
 
 func (cache *filesystemCache) DeleteReference(ref *Reference) error {
 	tagDir := filepath.Join(cache.rootDir, "refs", ref.Locator, "tags", tagOrDefault(ref.Object))
+	if _, err := os.Stat(tagDir); os.IsNotExist(err) {
+		return errors.New("ref not found")
+	}
 	return os.RemoveAll(tagDir)
 }
 
