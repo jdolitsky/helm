@@ -44,6 +44,33 @@
   version = "v11.2.8"
 
 [[projects]]
+  branch = "master"
+  digest = "1:e6c0499795b955bc38ca18d9c6f18119d31e1ced21f5ccf0f8a30f3bb9ffecb3"
+  name = "github.com/Azure/golua"
+  packages = [
+    "lua",
+    "lua/binary",
+    "lua/syntax",
+    "lua/vm",
+    "pkg/packer",
+    "pkg/pattern",
+    "pkg/strings",
+    "std",
+    "std/base",
+    "std/coro",
+    "std/debug",
+    "std/io",
+    "std/math",
+    "std/os",
+    "std/pkg",
+    "std/str",
+    "std/table",
+    "std/utf8",
+  ]
+  pruneopts = "UT"
+  revision = "5105380e819643c4fcf1ab813a32900ee4786916"
+
+[[projects]]
   digest = "1:9f3b30d9f8e0d7040f729b82dcbc8f0dead820a133b3147ce355fc451f32d761"
   name = "github.com/BurntSushi/toml"
   packages = ["."]
@@ -826,7 +853,7 @@
   version = "v1.0.3"
 
 [[projects]]
-  digest = "1:972c2427413d41a1e06ca4897e8528e5a1622894050e2f527b38ddf0f343f759"
+  digest = "1:8ff03ccc603abb0d7cce94d34b613f5f6251a9e1931eba1a3f9888a9029b055c"
   name = "github.com/stretchr/testify"
   packages = [
     "assert",
@@ -1616,6 +1643,8 @@
   analyzer-name = "dep"
   analyzer-version = 1
   input-imports = [
+    "github.com/Azure/golua/lua",
+    "github.com/Azure/golua/std",
     "github.com/BurntSushi/toml",
     "github.com/Masterminds/semver",
     "github.com/Masterminds/sprig",
