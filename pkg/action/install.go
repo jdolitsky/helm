@@ -40,7 +40,7 @@ import (
 //
 // As of Kubernetes 1.4, the max limit on a name is 63 chars. We reserve 10 for
 // charts to add data. Effectively, that gives us 53 chars.
-// See https://github.com/kubernetes/helm/issues/1528
+// See https://github.com/helm/helm/issues/1528
 const releaseNameMaxLen = 53
 
 // NOTESFILE_SUFFIX that we want to treat special. It goes through the templating engine
@@ -268,7 +268,7 @@ func (i *Install) renderResources(ch *chart.Chart, values chartutil.Values, vs c
 		}
 	}
 
-	files, err := engine.New().Render(ch, values)
+	files, err := engine.Render(ch, values)
 	if err != nil {
 		return hooks, buf, "", err
 	}
