@@ -29,15 +29,16 @@ const luaRunDesc = `
 TODO
 `
 
-func newLuaRunCmd(cfg *action.Configuration, out io.Writer) *cobra.Command {
+func newLuaInstallCmd(cfg *action.Configuration, out io.Writer) *cobra.Command {
 	return &cobra.Command{
-		Use:   "run",
-		Short: "run a lua script",
+		Use:   "install",
+		Short: "install a lua-based chart",
 		Long:  luaRunDesc,
-		Args:  require.MinimumNArgs(1),
+		Args:  require.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			luaScriptPath := args[0]
-			return action.NewLuaRun(cfg).Run(out, luaScriptPath)
+			releaseName := args[0]
+			chartPath := args[1]
+			return action.NewLuaInstall(cfg).Run(out, releaseName, chartPath)
 		},
 	}
 }

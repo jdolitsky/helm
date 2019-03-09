@@ -621,6 +621,14 @@
   version = "v1.0"
 
 [[projects]]
+  branch = "master"
+  digest = "1:32d408f0b1487d3f64921e469fd7d10b390dd1ded5887960d463f881f23c9365"
+  name = "github.com/jdolitsky/goluamapper"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "22d1c460d27d0636cf8bfc8f9ff581856b4cea8f"
+
+[[projects]]
   digest = "1:3e551bbb3a7c0ab2a2bf4660e7fcad16db089fdcfbb44b0199e62838038623ea"
   name = "github.com/json-iterator/go"
   packages = ["."]
@@ -694,6 +702,14 @@
   pruneopts = "UT"
   revision = "9e67c67572bc5dd02aef930e2b0ae3c02a4b5a5c"
   version = "v1.0.0"
+
+[[projects]]
+  digest = "1:53bc4cd4914cd7cd52139990d5170d6dc99067ae31c56530621b18b35fc30318"
+  name = "github.com/mitchellh/mapstructure"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "3536a929edddb9a5b34bd6861dc4a9647cb459fe"
+  version = "v1.1.2"
 
 [[projects]]
   digest = "1:33422d238f147d247752996a26574ac48dcf472976eda7f5134015f06bf16563"
@@ -1658,6 +1674,7 @@
     "github.com/gobwas/glob",
     "github.com/gosuri/uitable",
     "github.com/gosuri/uitable/util/strutil",
+    "github.com/jdolitsky/goluamapper",
     "github.com/mattn/go-shellwords",
     "github.com/opencontainers/go-digest",
     "github.com/opencontainers/image-spec/specs-go/v1",

@@ -68,6 +68,10 @@
   branch = "master"
 
 [[constraint]]
+  name = "github.com/jdolitsky/goluamapper"
+  branch = "master"
+
+[[constraint]]
   name = "github.com/stretchr/testify"
   version = "^1.3.0"
 

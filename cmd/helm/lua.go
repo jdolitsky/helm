@@ -30,11 +30,11 @@ TODO
 func newLuaCmd(cfg *action.Configuration, out io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "lua",
-		Short: "lua, lua, or lua. also lua.",
+		Short: "lua sandbox",
 		Long:  luaHelp,
 	}
 	cmd.AddCommand(
-		newLuaRunCmd(cfg, out),
+		newLuaInstallCmd(cfg, out),
 	)
 	return cmd
 }
