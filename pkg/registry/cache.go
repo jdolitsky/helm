@@ -20,19 +20,16 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	orascontent "github.com/deislabs/oras/pkg/content"
+	"github.com/opencontainers/go-digest"
+	checksum "github.com/opencontainers/go-digest"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/pkg/errors"
 	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
-	"time"
-
-	orascontent "github.com/deislabs/oras/pkg/content"
-	units "github.com/docker/go-units"
-	checksum "github.com/opencontainers/go-digest"
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/pkg/errors"
 
 	"helm.sh/helm/pkg/chart"
 	"helm.sh/helm/pkg/chart/loader"
@@ -52,225 +49,169 @@ type (
 )
 
 func (cache *filesystemCache) LayersToChart(layers []ocispec.Descriptor) (*chart.Chart, error) {
-	metaLayer, contentLayer, err := extractLayers(layers)
+	contentLayer, err := extractLayers(layers)
 	if err != nil {
 		return nil, err
 	}
-
-	name, version, err := extractChartNameVersionFromLayer(contentLayer)
-	if err != nil {
-		return nil, err
-	}
-
-	// Obtain raw chart meta content (json)
-	_, metaJSONRaw, ok := cache.store.Get(metaLayer)
-	if !ok {
-		return nil, errors.New("error retrieving meta layer")
-	}
-
-	// Construct chart metadata object
-	metadata := chart.Metadata{}
-	err = json.Unmarshal(metaJSONRaw, &metadata)
-	if err != nil {
-		return nil, err
-	}
-	metadata.APIVersion = chart.APIVersionV1
-	metadata.Name = name
-	metadata.Version = version
 
 	// Obtain raw chart content
 	_, contentRaw, ok := cache.store.Get(contentLayer)
 	if !ok {
-		return nil, errors.New("error retrieving meta layer")
+		return nil, errors.New("error retrieving chart content layer")
 	}
 
-	// Construct chart object and attach metadata
+	// Construct chart object from raw content
 	ch, err := loader.LoadArchive(bytes.NewBuffer(contentRaw))
 	if err != nil {
 		return nil, err
 	}
-	ch.Metadata = &metadata
 
 	return ch, nil
 }
 
-func (cache *filesystemCache) ChartToLayers(ch *chart.Chart) ([]ocispec.Descriptor, error) {
+func (cache *filesystemCache) ChartToLayers(ch *chart.Chart) (ocispec.Descriptor, []ocispec.Descriptor, error) {
+	var config ocispec.Descriptor
 
-	// extract/separate the name and version from other metadata
 	if err := ch.Validate(); err != nil {
-		return nil, err
+		return config, nil, err
 	}
-	name := ch.Metadata.Name
-	version := ch.Metadata.Version
 
-	// Create meta layer, clear name and version from Chart.yaml and convert to json
-	ch.Metadata.Name = ""
-	ch.Metadata.Version = ""
-	metaJSONRaw, err := json.Marshal(ch.Metadata)
+	// Set the metadata as config content
+	configRaw, err := json.Marshal(ch.Metadata)
 	if err != nil {
-		return nil, err
+		return config, nil, errors.Wrap(err, "could not convert metadata to json")
 	}
-	metaLayer := cache.store.Add(HelmChartMetaFileName, HelmChartMetaLayerMediaType, metaJSONRaw)
 
-	// Create content layer
-	// TODO: something better than this hack. Currently needed for chartutil.Save()
-	// If metadata does not contain Name or Version, an error is returned
-	// such as "no chart name specified (Chart.yaml)"
-	ch.Metadata = &chart.Metadata{
-		APIVersion: chart.APIVersionV1,
-		Name:       "-",
-		Version:    "0.1.0",
+	config = ocispec.Descriptor{
+		MediaType: ocispec.MediaTypeImageConfig,
+		Digest:    digest.FromBytes(configRaw),
+		Size:      int64(len(configRaw)),
 	}
+	cache.store.Set(config, configRaw)
+
 	destDir := mkdir(filepath.Join(cache.rootDir, "blobs", ".build"))
 	tmpFile, err := chartutil.Save(ch, destDir)
 	defer os.Remove(tmpFile)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to save")
+		return config, nil, errors.Wrap(err, "failed to save")
 	}
 	contentRaw, err := ioutil.ReadFile(tmpFile)
 	if err != nil {
-		return nil, err
+		return config, nil, err
 	}
-	contentLayer := cache.store.Add(HelmChartContentFileName, HelmChartContentLayerMediaType, contentRaw)
 
-	// Set annotations
-	contentLayer.Annotations[HelmChartNameAnnotation] = name
-	contentLayer.Annotations[HelmChartVersionAnnotation] = version
+	contentLayer := cache.store.Add("", HelmChartContentLayerMediaType, contentRaw)
+	layers := []ocispec.Descriptor{contentLayer}
 
-	layers := []ocispec.Descriptor{metaLayer, contentLayer}
-	return layers, nil
+	return config, layers, nil
 }
 
 func (cache *filesystemCache) LoadReference(ref *Reference) ([]ocispec.Descriptor, error) {
-	tagDir := filepath.Join(cache.rootDir, "refs", escape(ref.Repo), "tags", ref.Tag)
-
-	// add meta layer
-	metaJSONRaw, err := getSymlinkDestContent(filepath.Join(tagDir, "meta"))
+	_, contentLayerPath, err := describeReference(cache.rootDir, ref)
 	if err != nil {
 		return nil, err
 	}
-	metaLayer := cache.store.Add(HelmChartMetaFileName, HelmChartMetaLayerMediaType, metaJSONRaw)
 
 	// add content layer
-	contentRaw, err := getSymlinkDestContent(filepath.Join(tagDir, "content"))
+	contentRaw, err := ioutil.ReadFile(contentLayerPath)
 	if err != nil {
 		return nil, err
 	}
-	contentLayer := cache.store.Add(HelmChartContentFileName, HelmChartContentLayerMediaType, contentRaw)
+	contentLayer := cache.store.Add("", HelmChartContentLayerMediaType, contentRaw)
 
-	// set annotations on content layer (chart name and version)
-	err = setLayerAnnotationsFromChartLink(contentLayer, filepath.Join(tagDir, "chart"))
-	if err != nil {
-		return nil, err
-	}
-
-	printChartSummary(cache.out, metaLayer, contentLayer)
-	layers := []ocispec.Descriptor{metaLayer, contentLayer}
+	//cache.printChartSummary(contentLayer)
+	layers := []ocispec.Descriptor{contentLayer}
 	return layers, nil
 }
 
-func (cache *filesystemCache) StoreReference(ref *Reference, layers []ocispec.Descriptor) (bool, error) {
-	tagDir := mkdir(filepath.Join(cache.rootDir, "refs", escape(ref.Repo), "tags", ref.Tag))
+func describeReference(cacheRootDir string, ref *Reference) (string, string, error) {
+	return "/tmp/manifest", "/tmp/content", nil
+}
 
-	// Retrieve just the meta and content layers
-	metaLayer, contentLayer, err := extractLayers(layers)
+func (cache *filesystemCache) StoreReference(ref *Reference, config ocispec.Descriptor, layers []ocispec.Descriptor) (bool, error) {
+	var exists bool
+
+	// Retrieve content layer
+	contentLayer, err := extractLayers(layers)
 	if err != nil {
-		return false, err
-	}
-
-	// Extract chart name and version
-	name, version, err := extractChartNameVersionFromLayer(contentLayer)
-	if err != nil {
-		return false, err
-	}
-
-	// Create chart file
-	chartPath, err := createChartFile(filepath.Join(cache.rootDir, "charts"), name, version)
-	if err != nil {
-		return false, err
-	}
-
-	// Create chart symlink
-	err = createSymlink(chartPath, filepath.Join(tagDir, "chart"))
-	if err != nil {
-		return false, err
-	}
-
-	// Save meta blob
-	metaExists, metaPath := digestPath(filepath.Join(cache.rootDir, "blobs"), metaLayer.Digest)
-	if !metaExists {
-		fmt.Fprintf(cache.out, "%s: Saving meta (%s)\n",
-			shortDigest(metaLayer.Digest.Hex()), byteCountBinary(metaLayer.Size))
-		_, metaJSONRaw, ok := cache.store.Get(metaLayer)
-		if !ok {
-			return false, errors.New("error retrieving meta layer")
-		}
-		err = writeFile(metaPath, metaJSONRaw)
-		if err != nil {
-			return false, err
-		}
-	}
-
-	// Create meta symlink
-	err = createSymlink(metaPath, filepath.Join(tagDir, "meta"))
-	if err != nil {
-		return false, err
+		return exists, err
 	}
 
 	// Save content blob
-	contentExists, contentPath := digestPath(filepath.Join(cache.rootDir, "blobs"), contentLayer.Digest)
-	if !contentExists {
-		fmt.Fprintf(cache.out, "%s: Saving content (%s)\n",
-			shortDigest(contentLayer.Digest.Hex()), byteCountBinary(contentLayer.Size))
-		_, contentRaw, ok := cache.store.Get(contentLayer)
-		if !ok {
-			return false, errors.New("error retrieving content layer")
-		}
-		err = writeFile(contentPath, contentRaw)
-		if err != nil {
-			return false, err
-		}
+	_, contentRaw, ok := cache.store.Get(contentLayer)
+	if !ok {
+		return exists, errors.New("error retrieving content layer")
 	}
-
-	// Create content symlink
-	err = createSymlink(contentPath, filepath.Join(tagDir, "content"))
+	contentPath := digestPath(filepath.Join(cache.rootDir, "blobs"), contentLayer.Digest)
+	err = writeFile(contentPath, contentRaw)
 	if err != nil {
-		return false, err
+		return exists, err
 	}
 
-	printChartSummary(cache.out, metaLayer, contentLayer)
-	return metaExists && contentExists, nil
+
+	// Save config blob
+	_, configRaw, ok := cache.store.Get(config)
+	if !ok {
+		return exists, errors.New("error retrieving config")
+	}
+	configPath := digestPath(filepath.Join(cache.rootDir, "blobs"), config.Digest)
+	err = writeFile(configPath, configRaw)
+	if err != nil {
+		return exists, err
+	}
+
+	fmt.Fprintf(cache.out, "Reference:        %s:%s\n", ref.Repo, ref.Tag)
+	cache.printChartSummary(config)
+	fmt.Fprintf(cache.out, "Content Digest:   %s\n", contentLayer.Digest.Hex())
+	return exists, nil
 }
 
 func (cache *filesystemCache) DeleteReference(ref *Reference) error {
-	tagDir := filepath.Join(cache.rootDir, "refs", escape(ref.Repo), "tags", ref.Tag)
-	if _, err := os.Stat(tagDir); os.IsNotExist(err) {
-		return errors.New("ref not found")
+	manifestLayerPath, contentLayerPath, err := describeReference(cache.rootDir, ref)
+	if err != nil {
+		return err
 	}
-	return os.RemoveAll(tagDir)
+
+	// Update index.json
+	// TODO
+
+	// Delete manifest layer
+	err = os.Remove(contentLayerPath)
+	if err != nil {
+		return err
+	}
+
+	// Delete content layer
+	err = os.Remove(manifestLayerPath)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (cache *filesystemCache) describeReference(rootDir string, ref *Reference) (string, string, error) {
+	return "", "", nil
 }
 
 func (cache *filesystemCache) TableRows() ([][]interface{}, error) {
-	return getRefsSorted(filepath.Join(cache.rootDir, "refs"))
-}
-
-// escape sanitizes a registry URL to remove characters such as ":"
-// which are illegal on windows
-func escape(s string) string {
-	return strings.ReplaceAll(s, ":", "_")
-}
-
-// escape reverses escape
-func unescape(s string) string {
-	return strings.ReplaceAll(s, "_", ":")
+	return getRefsSorted(cache.rootDir)
 }
 
 // printChartSummary prints details about a chart layers
-func printChartSummary(out io.Writer, metaLayer ocispec.Descriptor, contentLayer ocispec.Descriptor) {
-	fmt.Fprintf(out, "Name: %s\n", contentLayer.Annotations[HelmChartNameAnnotation])
-	fmt.Fprintf(out, "Version: %s\n", contentLayer.Annotations[HelmChartVersionAnnotation])
-	fmt.Fprintf(out, "Meta: %s\n", metaLayer.Digest)
-	fmt.Fprintf(out, "Content: %s\n", contentLayer.Digest)
+func (cache *filesystemCache) printChartSummary(config ocispec.Descriptor) {
+
+	metadata := chart.Metadata{}
+
+	// TODO handle errors here
+	_, content, _ := cache.store.Get(config)
+	json.Unmarshal(content, &metadata)
+
+	fmt.Fprintf(cache.out, "Chart Name:       %s\n", metadata.Name)
+	fmt.Fprintf(cache.out, "Chart Version:    %s\n", metadata.Version)
+
+	// TODO print digest elsewhere?
+	fmt.Fprintf(cache.out, "Config Digest:    %s\n", config.Digest.Hex())
 }
 
 // fileExists determines if a file exists
@@ -303,60 +244,26 @@ func getSymlinkDestContent(linkPath string) ([]byte, error) {
 	return ioutil.ReadFile(src)
 }
 
-// setLayerAnnotationsFromChartLink will set chart name/version annotations on a layer
-// based on the path of the chart link destination
-func setLayerAnnotationsFromChartLink(layer ocispec.Descriptor, chartLinkPath string) error {
-	src, err := os.Readlink(chartLinkPath)
-	if err != nil {
-		return err
-	}
-	// example path: /some/path/charts/mychart/versions/1.2.0
-	chartName := filepath.Base(filepath.Dir(filepath.Dir(src)))
-	chartVersion := filepath.Base(src)
-	layer.Annotations[HelmChartNameAnnotation] = chartName
-	layer.Annotations[HelmChartVersionAnnotation] = chartVersion
-	return nil
-}
+// extractLayers obtains the content layer from a list of layers
+func extractLayers(layers []ocispec.Descriptor) (ocispec.Descriptor, error) {
+	var contentLayer ocispec.Descriptor
 
-// extractLayers obtains the meta and content layers from a list of layers
-func extractLayers(layers []ocispec.Descriptor) (ocispec.Descriptor, ocispec.Descriptor, error) {
-	var metaLayer, contentLayer ocispec.Descriptor
-
-	if len(layers) != 2 {
-		return metaLayer, contentLayer, errors.New("manifest does not contain exactly 2 layers")
+	if len(layers) != 1 {
+		return contentLayer, errors.New("manifest does not contain exactly 1 layer")
 	}
 
 	for _, layer := range layers {
 		switch layer.MediaType {
-		case HelmChartMetaLayerMediaType:
-			metaLayer = layer
 		case HelmChartContentLayerMediaType:
 			contentLayer = layer
 		}
 	}
 
-	if metaLayer.Size == 0 {
-		return metaLayer, contentLayer, errors.New("manifest does not contain a Helm chart meta layer")
-	}
-
 	if contentLayer.Size == 0 {
-		return metaLayer, contentLayer, errors.New("manifest does not contain a Helm chart content layer")
+		return contentLayer, errors.New("manifest does not contain a valid Helm chart content layer")
 	}
 
-	return metaLayer, contentLayer, nil
-}
-
-// extractChartNameVersionFromLayer retrieves the chart name and version from layer annotations
-func extractChartNameVersionFromLayer(layer ocispec.Descriptor) (string, string, error) {
-	name, ok := layer.Annotations[HelmChartNameAnnotation]
-	if !ok {
-		return "", "", errors.New("could not find chart name in annotations")
-	}
-	version, ok := layer.Annotations[HelmChartVersionAnnotation]
-	if !ok {
-		return "", "", errors.New("could not find chart version in annotations")
-	}
-	return name, version, nil
+	return contentLayer, nil
 }
 
 // createChartFile creates a file under "<chartsdir>" dir which is linked to by ref
@@ -373,11 +280,10 @@ func createChartFile(chartsRootDir string, name string, version string) (string,
 	return chartPath, nil
 }
 
-// digestPath returns the path to addressable content, and whether the file exists
-func digestPath(rootDir string, digest checksum.Digest) (bool, string) {
+// digestPath returns the path to addressable content
+func digestPath(rootDir string, digest checksum.Digest) string {
 	path := filepath.Join(rootDir, "sha256", digest.Hex())
-	exists := fileExists(path)
-	return exists, path
+	return path
 }
 
 // writeFile creates a path, ensuring parent directory
@@ -408,52 +314,9 @@ func shortDigest(digest string) string {
 	return digest
 }
 
-// getRefsSorted returns a map of all refs stored in a refsRootDir
-func getRefsSorted(refsRootDir string) ([][]interface{}, error) {
+// getRefsSorted returns a map of all refs stored in a cache
+func getRefsSorted(cacheRootDir string) ([][]interface{}, error) {
 	refsMap := map[string]map[string]string{}
-
-	// Walk the storage dir, check for symlinks under "refs" dir pointing to valid files in "blobs/" and "charts/"
-	err := filepath.Walk(refsRootDir, func(path string, fileInfo os.FileInfo, fileError error) error {
-
-		// Check if this file is a symlink
-		linkPath, err := os.Readlink(path)
-		if err == nil {
-			destFileInfo, err := os.Stat(linkPath)
-			if err == nil {
-				tagDir := filepath.Dir(path)
-
-				// Determine the ref
-				repo := unescape(strings.TrimLeft(
-					strings.TrimPrefix(filepath.Dir(filepath.Dir(tagDir)), refsRootDir), "/\\"))
-				tag := filepath.Base(tagDir)
-				ref := fmt.Sprintf("%s:%s", repo, tag)
-
-				// Init hashmap entry if does not exist
-				if _, ok := refsMap[ref]; !ok {
-					refsMap[ref] = map[string]string{}
-				}
-
-				// Add data to entry based on file name (symlink name)
-				base := filepath.Base(path)
-				switch base {
-				case "chart":
-					refsMap[ref]["name"] = filepath.Base(filepath.Dir(filepath.Dir(linkPath)))
-					refsMap[ref]["version"] = destFileInfo.Name()
-				case "content":
-
-					// Make sure the filename looks like a sha256 digest (64 chars)
-					digest := destFileInfo.Name()
-					if len(digest) == 64 {
-						refsMap[ref]["digest"] = shortDigest(digest)
-						refsMap[ref]["size"] = byteCountBinary(destFileInfo.Size())
-						refsMap[ref]["created"] = units.HumanDuration(time.Now().UTC().Sub(destFileInfo.ModTime()))
-					}
-				}
-			}
-		}
-
-		return nil
-	})
 
 	// Filter out any refs that are incomplete (do not have all required fields)
 	for k, ref := range refsMap {
@@ -485,5 +348,7 @@ func getRefsSorted(refsRootDir string) ([][]interface{}, error) {
 		}
 	}
 
+	var err error
+	err = nil
 	return refs, err
 }

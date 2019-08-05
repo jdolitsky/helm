@@ -18,8 +18,13 @@ package registry // import "helm.sh/helm/pkg/registry"
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"github.com/opencontainers/go-digest"
+	"github.com/opencontainers/image-spec/specs-go"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"io"
+	"path/filepath"
 
 	orascontent "github.com/deislabs/oras/pkg/content"
 	orascontext "github.com/deislabs/oras/pkg/context"
@@ -106,18 +111,18 @@ func (c *Client) PushChart(ref *Reference) error {
 		totalSize += layer.Size
 	}
 	fmt.Fprintf(c.out,
-		"%s: pushed to remote (%d layers, %s total)\n", ref.Tag, len(layers), byteCountBinary(totalSize))
+		"%s: pushed to remote (%s total)\n", ref.Tag, byteCountBinary(totalSize))
 	return nil
 }
 
 // PullChart downloads a chart from a registry
 func (c *Client) PullChart(ref *Reference) error {
 	fmt.Fprintf(c.out, "%s: Pulling from %s\n", ref.Tag, ref.Repo)
-	_, layers, err := oras.Pull(c.newContext(), c.resolver, ref.String(), c.cache.store, oras.WithAllowedMediaTypes(KnownMediaTypes()))
+	config, layers, err := oras.Pull(c.newContext(), c.resolver, ref.String(), c.cache.store, oras.WithAllowedMediaTypes(KnownMediaTypes()))
 	if err != nil {
 		return err
 	}
-	exists, err := c.cache.StoreReference(ref, layers)
+	exists, err := c.cache.StoreReference(ref, config, layers)
 	if err != nil {
 		return err
 	}
@@ -131,15 +136,53 @@ func (c *Client) PullChart(ref *Reference) error {
 
 // SaveChart stores a copy of chart in local cache
 func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
-	layers, err := c.cache.ChartToLayers(ch)
+	config, layers, err := c.cache.ChartToLayers(ch)
 	if err != nil {
 		return err
 	}
-	_, err = c.cache.StoreReference(ref, layers)
+	_, err = c.cache.StoreReference(ref, config, layers)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(c.out, "%s: saved\n", ref.Tag)
+
+	manifest := ocispec.Manifest{
+		Versioned: specs.Versioned{
+			SchemaVersion: 2, // historical value. does not pertain to OCI or docker version
+		},
+		Config: config,
+		Layers: layers,
+	}
+
+	manifestRaw, err := json.Marshal(manifest)
+	if err != nil {
+		return err
+	}
+
+	manifestDescriptor := ocispec.Descriptor{
+		MediaType: ocispec.MediaTypeImageManifest,
+		Digest:    digest.FromBytes(manifestRaw),
+		Size:      int64(len(manifestRaw)),
+	}
+
+	manifestPath := digestPath(filepath.Join(c.cache.rootDir, "blobs"), manifestDescriptor.Digest)
+
+	err = writeFile(manifestPath, manifestRaw)
+	if err != nil {
+		return err
+	}
+
+	//manifest, err := oras.Push(c.newContext(), c.resolver, ref.String(), c.cache.store, layers,
+	//	oras.WithConfigMediaType(HelmChartConfigMediaType))
+	//if err != nil {// Save manifest blob
+	//	return err//TODO
+	//}//fmt.Fprintf(cache.out, "%s: Saving chart manifest (%s)\n",
+	//	shortDigest(contentLayer.Digest.Hex()), byteCountBinary(contentLayer.Size))
+	// exists = true
+
+	// Update index.json
+	//TODO
+
+	fmt.Fprintf(c.out, "Manifest Digest:  %s\n", manifestDescriptor.Digest.Hex())
 	return nil
 }
 
