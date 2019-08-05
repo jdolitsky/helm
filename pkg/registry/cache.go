@@ -55,9 +55,17 @@ func (cache *filesystemCache) LayersToChart(layers []ocispec.Descriptor) (*chart
 	}
 
 	// Obtain raw chart content
+	/*
 	_, contentRaw, ok := cache.store.Get(contentLayer)
 	if !ok {
 		return nil, errors.New("error retrieving chart content layer")
+	}
+	*/
+
+	contentPath := digestPath(filepath.Join(cache.rootDir, "blobs"), contentLayer.Digest)
+	contentRaw, err := ioutil.ReadFile(contentPath)
+	if err != nil {
+		return nil, err
 	}
 
 	// Construct chart object from raw content
@@ -107,21 +115,45 @@ func (cache *filesystemCache) ChartToLayers(ch *chart.Chart) (ocispec.Descriptor
 }
 
 func (cache *filesystemCache) LoadReference(ref *Reference) ([]ocispec.Descriptor, error) {
-	_, contentLayerPath, err := describeReference(cache.rootDir, ref)
+	var index ocispec.Index
+
+	indexRaw, err := ioutil.ReadFile(filepath.Join(cache.rootDir, "index.json"))
+
+	err = json.Unmarshal(indexRaw, &index)
 	if err != nil {
 		return nil, err
 	}
 
-	// add content layer
-	contentRaw, err := ioutil.ReadFile(contentLayerPath)
+	found := false
+	var d checksum.Digest
+	for _, manifest := range index.Manifests {
+		if val, ok := manifest.Annotations["org.opencontainers.image.ref.name"]; ok {
+			if val == fmt.Sprintf("%s:%s", ref.Repo, ref.Tag) {
+				found = true
+				d = manifest.Digest
+			}
+		}
+	}
+
+	if !found {
+		return nil, errors.New("ref not found")
+	}
+
+	// TODO
+	// 1. Load manifest
+	// 2. return layers
+	manifestPath := digestPath(filepath.Join(cache.rootDir, "blobs"), d)
+	manifestRaw, err := ioutil.ReadFile(manifestPath)
 	if err != nil {
 		return nil, err
 	}
-	contentLayer := cache.store.Add("", HelmChartContentLayerMediaType, contentRaw)
+	var m ocispec.Manifest
+	err = json.Unmarshal(manifestRaw, &m)
+	if err != nil {
+		return nil, err
+	}
 
-	//cache.printChartSummary(contentLayer)
-	layers := []ocispec.Descriptor{contentLayer}
-	return layers, nil
+	return m.Layers, nil
 }
 
 func describeReference(cacheRootDir string, ref *Reference) (string, string, error) {
