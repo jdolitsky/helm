@@ -185,11 +185,26 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 }
 
 func updateIndexJson(cacheRootDir string, manifest ocispec.Descriptor) error {
+	indexJsonFilePath := filepath.Join(cacheRootDir, "index.json")
+
+	indexJsonRaw, err := ioutil.ReadFile(indexJsonFilePath)
+	if err != nil {
+		return err
+	}
+
+	var origIndex ocispec.Index
+	err = json.Unmarshal(indexJsonRaw, &origIndex)
+	if err != nil {
+		return err
+	}
+
+	origIndex.Manifests = append(origIndex.Manifests, manifest)
+
 	index := ocispec.Index{
 		Versioned: specs.Versioned{
 			SchemaVersion: 2, // historical value. does not pertain to OCI or docker version
 		},
-		Manifests: []ocispec.Descriptor{manifest},
+		Manifests: origIndex.Manifests,
 	}
 	indexRaw, err := json.Marshal(index)
 	if err != nil {
