@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	orascontent "github.com/deislabs/oras/pkg/content"
+	"github.com/docker/go-units"
 	"github.com/opencontainers/go-digest"
 	checksum "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -33,6 +34,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 )
 
 var (
@@ -52,14 +54,6 @@ func (cache *filesystemCache) LayersToChart(layers []ocispec.Descriptor) (*chart
 	if err != nil {
 		return nil, err
 	}
-
-	// Obtain raw chart content
-	/*
-	_, contentRaw, ok := cache.store.Get(contentLayer)
-	if !ok {
-		return nil, errors.New("error retrieving chart content layer")
-	}
-	*/
 
 	contentPath := digestPath(filepath.Join(cache.rootDir, "blobs"), contentLayer.Digest)
 	contentRaw, err := ioutil.ReadFile(contentPath)
@@ -258,34 +252,10 @@ func (cache *filesystemCache) printChartSummary(config ocispec.Descriptor) {
 
 }
 
-// fileExists determines if a file exists
-func fileExists(path string) bool {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return false
-	}
-	return true
-}
-
 // mkdir will create a directory (no error check) and return the path
 func mkdir(dir string) string {
 	os.MkdirAll(dir, 0755)
 	return dir
-}
-
-// createSymlink creates a symbolic link, deleting existing one if exists
-func createSymlink(src string, dest string) error {
-	os.Remove(dest)
-	err := os.Symlink(src, dest)
-	return err
-}
-
-// getSymlinkDestContent returns the file contents of a symlink's destination
-func getSymlinkDestContent(linkPath string) ([]byte, error) {
-	src, err := os.Readlink(linkPath)
-	if err != nil {
-		return nil, err
-	}
-	return ioutil.ReadFile(src)
 }
 
 // extractLayers obtains the content layer from a list of layers
@@ -376,12 +346,48 @@ func getRefsSorted(cacheRootDir string) ([][]interface{}, error) {
 
 	for _, manifest := range index.Manifests {
 		if ref, ok := manifest.Annotations["org.opencontainers.image.ref.name"]; ok {
+			manifestPath := digestPath(filepath.Join(cacheRootDir, "blobs"), manifest.Digest)
+			manifestRaw, err := ioutil.ReadFile(manifestPath)
+			if err != nil {
+				return nil, err
+			}
+
+			var manifest ocispec.Manifest
+			err = json.Unmarshal(manifestRaw, &manifest)
+			if err != nil {
+				return nil, err
+			}
+
+			configPath := digestPath(filepath.Join(cacheRootDir, "blobs"), manifest.Config.Digest)
+			configRaw, err := ioutil.ReadFile(configPath)
+			if err != nil {
+				return nil, err
+			}
+			var metadata chart.Metadata
+			err = json.Unmarshal(configRaw, &metadata)
+			if err != nil {
+				return nil, err
+			}
+
 			refsMap[ref] = map[string]string{}
-			refsMap[ref]["name"] = "abc"
-			refsMap[ref]["version"] = "1.2.3"
-			refsMap[ref]["digest"] = "x"
-			refsMap[ref]["size"] = "1"
-			refsMap[ref]["created"] = "today"
+			refsMap[ref]["name"] = metadata.Name
+			refsMap[ref]["version"] = metadata.Version
+
+			contentLayer, err := extractLayers(manifest.Layers)
+			if err != nil {
+				return nil, err
+			}
+
+			refsMap[ref]["digest"] = shortDigest(contentLayer.Digest.Hex())
+			refsMap[ref]["size"] = byteCountBinary(contentLayer.Size)
+
+			contentPath := digestPath(filepath.Join(cacheRootDir, "blobs"), contentLayer.Digest)
+			destFileInfo, err := os.Stat(contentPath)
+			if err != nil {
+				return nil, err
+			}
+
+			refsMap[ref]["created"] = units.HumanDuration(time.Now().UTC().Sub(destFileInfo.ModTime()))
 		}
 	}
 
