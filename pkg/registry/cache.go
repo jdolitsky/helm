@@ -131,6 +131,11 @@ func describeReference(cacheRootDir string, ref *Reference) (string, string, err
 func (cache *filesystemCache) StoreReference(ref *Reference, config ocispec.Descriptor, layers []ocispec.Descriptor) (bool, error) {
 	var exists bool
 
+	err := cache.ensureOciLayoutFile()
+	if err != nil {
+		return exists, err
+	}
+
 	// Retrieve content layer
 	contentLayer, err := extractLayers(layers)
 	if err != nil {
@@ -148,7 +153,6 @@ func (cache *filesystemCache) StoreReference(ref *Reference, config ocispec.Desc
 		return exists, err
 	}
 
-
 	// Save config blob
 	_, configRaw, ok := cache.store.Get(config)
 	if !ok {
@@ -162,7 +166,11 @@ func (cache *filesystemCache) StoreReference(ref *Reference, config ocispec.Desc
 
 	fmt.Fprintf(cache.out, "Reference:        %s:%s\n", ref.Repo, ref.Tag)
 	cache.printChartSummary(config)
+
+	fmt.Fprintf(cache.out, "Content Size:     %s\n", byteCountBinary(contentLayer.Size))
 	fmt.Fprintf(cache.out, "Content Digest:   %s\n", contentLayer.Digest.Hex())
+	fmt.Fprintf(cache.out, "Config Digest:    %s\n", config.Digest.Hex())
+
 	return exists, nil
 }
 
@@ -190,6 +198,13 @@ func (cache *filesystemCache) DeleteReference(ref *Reference) error {
 	return nil
 }
 
+func (cache *filesystemCache) ensureOciLayoutFile() error {
+	mkdir(cache.rootDir)
+	content := []byte("{\"imageLayoutVersion\":\"1.0.0\"}")
+	err := ioutil.WriteFile(filepath.Join(cache.rootDir, "oci-layout"), content, 0644)
+	return err
+}
+
 func (cache *filesystemCache) describeReference(rootDir string, ref *Reference) (string, string, error) {
 	return "", "", nil
 }
@@ -210,8 +225,6 @@ func (cache *filesystemCache) printChartSummary(config ocispec.Descriptor) {
 	fmt.Fprintf(cache.out, "Chart Name:       %s\n", metadata.Name)
 	fmt.Fprintf(cache.out, "Chart Version:    %s\n", metadata.Version)
 
-	// TODO print digest elsewhere?
-	fmt.Fprintf(cache.out, "Config Digest:    %s\n", config.Digest.Hex())
 }
 
 // fileExists determines if a file exists

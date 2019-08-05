@@ -24,6 +24,7 @@ import (
 	"github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"io"
+	"io/ioutil"
 	"path/filepath"
 
 	orascontent "github.com/deislabs/oras/pkg/content"
@@ -162,6 +163,9 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 		MediaType: ocispec.MediaTypeImageManifest,
 		Digest:    digest.FromBytes(manifestRaw),
 		Size:      int64(len(manifestRaw)),
+		Annotations: map[string]string{
+			"org.opencontainers.image.ref.name": fmt.Sprintf("%s:%s", ref.Repo, ref.Tag),
+		},
 	}
 
 	manifestPath := digestPath(filepath.Join(c.cache.rootDir, "blobs"), manifestDescriptor.Digest)
@@ -171,19 +175,28 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 		return err
 	}
 
-	//manifest, err := oras.Push(c.newContext(), c.resolver, ref.String(), c.cache.store, layers,
-	//	oras.WithConfigMediaType(HelmChartConfigMediaType))
-	//if err != nil {// Save manifest blob
-	//	return err//TODO
-	//}//fmt.Fprintf(cache.out, "%s: Saving chart manifest (%s)\n",
-	//	shortDigest(contentLayer.Digest.Hex()), byteCountBinary(contentLayer.Size))
-	// exists = true
-
-	// Update index.json
-	//TODO
+	err = updateIndexJson(c.cache.rootDir, manifestDescriptor)
+	if err != nil {
+		return err
+	}
 
 	fmt.Fprintf(c.out, "Manifest Digest:  %s\n", manifestDescriptor.Digest.Hex())
 	return nil
+}
+
+func updateIndexJson(cacheRootDir string, manifest ocispec.Descriptor) error {
+	index := ocispec.Index{
+		Versioned: specs.Versioned{
+			SchemaVersion: 2, // historical value. does not pertain to OCI or docker version
+		},
+		Manifests: []ocispec.Descriptor{manifest},
+	}
+	indexRaw, err := json.Marshal(index)
+	if err != nil {
+		return err
+	}
+	err = ioutil.WriteFile(filepath.Join(cacheRootDir, "index.json"), indexRaw, 0644)
+	return err
 }
 
 // LoadChart retrieves a chart object by reference
