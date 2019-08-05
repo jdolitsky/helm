@@ -25,15 +25,14 @@ import (
 	checksum "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
+	"helm.sh/helm/pkg/chart"
+	"helm.sh/helm/pkg/chart/loader"
+	"helm.sh/helm/pkg/chartutil"
 	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sort"
-
-	"helm.sh/helm/pkg/chart"
-	"helm.sh/helm/pkg/chart/loader"
-	"helm.sh/helm/pkg/chartutil"
 )
 
 var (
@@ -363,6 +362,29 @@ func shortDigest(digest string) string {
 func getRefsSorted(cacheRootDir string) ([][]interface{}, error) {
 	refsMap := map[string]map[string]string{}
 
+	var index ocispec.Index
+
+	indexRaw, err := ioutil.ReadFile(filepath.Join(cacheRootDir, "index.json"))
+	if err != nil {
+		return nil, err
+	}
+
+	err = json.Unmarshal(indexRaw, &index)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, manifest := range index.Manifests {
+		if ref, ok := manifest.Annotations["org.opencontainers.image.ref.name"]; ok {
+			refsMap[ref] = map[string]string{}
+			refsMap[ref]["name"] = "abc"
+			refsMap[ref]["version"] = "1.2.3"
+			refsMap[ref]["digest"] = "x"
+			refsMap[ref]["size"] = "1"
+			refsMap[ref]["created"] = "today"
+		}
+	}
+
 	// Filter out any refs that are incomplete (do not have all required fields)
 	for k, ref := range refsMap {
 		allKeysFound := true
@@ -393,7 +415,5 @@ func getRefsSorted(cacheRootDir string) ([][]interface{}, error) {
 		}
 	}
 
-	var err error
-	err = nil
-	return refs, err
+	return refs, nil
 }
