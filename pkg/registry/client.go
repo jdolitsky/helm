@@ -25,6 +25,7 @@ import (
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"io"
 	"io/ioutil"
+	"os"
 	"path/filepath"
 
 	orascontent "github.com/deislabs/oras/pkg/content"
@@ -168,7 +169,7 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 		},
 	}
 
-	manifestPath := digestPath(filepath.Join(c.cache.rootDir, "blobs"), manifestDescriptor.Digest)
+	_, manifestPath := digestPath(filepath.Join(c.cache.rootDir, "blobs"), manifestDescriptor.Digest)
 
 	err = writeFile(manifestPath, manifestRaw)
 	if err != nil {
@@ -186,6 +187,17 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 
 func updateIndexJson(cacheRootDir string, manifest ocispec.Descriptor) error {
 	indexJsonFilePath := filepath.Join(cacheRootDir, "index.json")
+	if _, err := os.Stat(indexJsonFilePath); os.IsNotExist(err) {
+		tmpIndex := ocispec.Index{}
+		tmpIndexRaw, err := json.Marshal(tmpIndex)
+		if err != nil {
+			return err
+		}
+		err = ioutil.WriteFile(indexJsonFilePath, tmpIndexRaw, 0644)
+		if err != nil {
+			return err
+		}
+	}
 
 	indexJsonRaw, err := ioutil.ReadFile(indexJsonFilePath)
 	if err != nil {

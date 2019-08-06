@@ -55,7 +55,7 @@ func (cache *filesystemCache) LayersToChart(layers []ocispec.Descriptor) (*chart
 		return nil, err
 	}
 
-	contentPath := digestPath(filepath.Join(cache.rootDir, "blobs"), contentLayer.Digest)
+	_, contentPath := digestPath(filepath.Join(cache.rootDir, "blobs"), contentLayer.Digest)
 	contentRaw, err := ioutil.ReadFile(contentPath)
 	if err != nil {
 		return nil, err
@@ -135,7 +135,7 @@ func (cache *filesystemCache) LoadReference(ref *Reference) ([]ocispec.Descripto
 	// TODO
 	// 1. Load manifest
 	// 2. return layers
-	manifestPath := digestPath(filepath.Join(cache.rootDir, "blobs"), d)
+	_, manifestPath := digestPath(filepath.Join(cache.rootDir, "blobs"), d)
 	manifestRaw, err := ioutil.ReadFile(manifestPath)
 	if err != nil {
 		return nil, err
@@ -172,10 +172,13 @@ func (cache *filesystemCache) StoreReference(ref *Reference, config ocispec.Desc
 	if !ok {
 		return exists, errors.New("error retrieving content layer")
 	}
-	contentPath := digestPath(filepath.Join(cache.rootDir, "blobs"), contentLayer.Digest)
-	err = writeFile(contentPath, contentRaw)
-	if err != nil {
-		return exists, err
+	contentExists, contentPath := digestPath(filepath.Join(cache.rootDir, "blobs"), contentLayer.Digest)
+
+	if !contentExists {
+		err = writeFile(contentPath, contentRaw)
+		if err != nil {
+			return exists, err
+		}
 	}
 
 	// Save config blob
@@ -183,7 +186,7 @@ func (cache *filesystemCache) StoreReference(ref *Reference, config ocispec.Desc
 	if !ok {
 		return exists, errors.New("error retrieving config")
 	}
-	configPath := digestPath(filepath.Join(cache.rootDir, "blobs"), config.Digest)
+	_, configPath := digestPath(filepath.Join(cache.rootDir, "blobs"), config.Digest)
 	err = writeFile(configPath, configRaw)
 	if err != nil {
 		return exists, err
@@ -294,10 +297,19 @@ func createChartFile(chartsRootDir string, name string, version string) (string,
 	return chartPath, nil
 }
 
-// digestPath returns the path to addressable content
-func digestPath(rootDir string, digest checksum.Digest) string {
+// digestPath returns the path to addressable content, and whether the file exists
+func digestPath(rootDir string, digest checksum.Digest) (bool, string) {
 	path := filepath.Join(rootDir, "sha256", digest.Hex())
-	return path
+	exists := fileExists(path)
+	return exists, path
+}
+
+// fileExists determines if a file exists
+func fileExists(path string) bool {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return false
+	}
+	return true
 }
 
 // writeFile creates a path, ensuring parent directory
@@ -346,7 +358,7 @@ func getRefsSorted(cacheRootDir string) ([][]interface{}, error) {
 
 	for _, manifest := range index.Manifests {
 		if ref, ok := manifest.Annotations["org.opencontainers.image.ref.name"]; ok {
-			manifestPath := digestPath(filepath.Join(cacheRootDir, "blobs"), manifest.Digest)
+			_, manifestPath := digestPath(filepath.Join(cacheRootDir, "blobs"), manifest.Digest)
 			manifestRaw, err := ioutil.ReadFile(manifestPath)
 			if err != nil {
 				return nil, err
@@ -358,7 +370,7 @@ func getRefsSorted(cacheRootDir string) ([][]interface{}, error) {
 				return nil, err
 			}
 
-			configPath := digestPath(filepath.Join(cacheRootDir, "blobs"), manifest.Config.Digest)
+			_, configPath := digestPath(filepath.Join(cacheRootDir, "blobs"), manifest.Config.Digest)
 			configRaw, err := ioutil.ReadFile(configPath)
 			if err != nil {
 				return nil, err
@@ -381,7 +393,7 @@ func getRefsSorted(cacheRootDir string) ([][]interface{}, error) {
 			refsMap[ref]["digest"] = shortDigest(contentLayer.Digest.Hex())
 			refsMap[ref]["size"] = byteCountBinary(contentLayer.Size)
 
-			contentPath := digestPath(filepath.Join(cacheRootDir, "blobs"), contentLayer.Digest)
+			_, contentPath := digestPath(filepath.Join(cacheRootDir, "blobs"), contentLayer.Digest)
 			destFileInfo, err := os.Stat(contentPath)
 			if err != nil {
 				return nil, err
