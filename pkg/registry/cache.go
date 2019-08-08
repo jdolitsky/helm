@@ -85,7 +85,8 @@ func (cache *filesystemCache) ChartToLayers(ch *chart.Chart) (ocispec.Descriptor
 	}
 	cache.store.Set(config, configRaw)
 
-	destDir := mkdir(filepath.Join(cache.rootDir, "blobs", ".build"))
+	destDir := filepath.Join(cache.rootDir, "blobs", ".build")
+	os.MkdirAll(destDir, 0755)
 	tmpFile, err := chartutil.Save(ch, destDir)
 	defer os.Remove(tmpFile)
 	if err != nil {
@@ -109,10 +110,6 @@ func (cache *filesystemCache) LoadReference(ref *Reference) ([]ocispec.Descripto
 		return nil, errors.New("ref not found")
 	}
 	return m.Layers, nil
-}
-
-func describeReference(cacheRootDir string, ref *Reference) (string, string, error) {
-	return "/tmp/manifest", "/tmp/content", nil
 }
 
 func (cache *filesystemCache) StoreReference(ref *Reference, config ocispec.Descriptor, layers []ocispec.Descriptor) (bool, error) {
@@ -156,38 +153,12 @@ func (cache *filesystemCache) StoreReference(ref *Reference, config ocispec.Desc
 }
 
 func (cache *filesystemCache) DeleteReference(ref *Reference) error {
-	manifestLayerPath, contentLayerPath, err := describeReference(cache.rootDir, ref)
-	if err != nil {
-		return err
-	}
-
-	// Update index.json
-	// TODO
-
-	// Delete manifest layer
-	err = os.Remove(contentLayerPath)
-	if err != nil {
-		return err
-	}
-
-	// Delete content layer
-	err = os.Remove(manifestLayerPath)
-	if err != nil {
-		return err
-	}
-
+	refStr := fmt.Sprintf("%s:%s", ref.Repo, ref.Tag)
+	_, _ = cache.index.DeleteManifestByRef(refStr)
+	cache.index.Save()
 	return nil
-}
-
-func (cache *filesystemCache) ensureOciLayoutFile() error {
-	mkdir(cache.rootDir)
-	content := []byte("{\"imageLayoutVersion\":\"1.0.0\"}")
-	err := ioutil.WriteFile(filepath.Join(cache.rootDir, "oci-layout"), content, 0644)
-	return err
-}
-
-func (cache *filesystemCache) describeReference(rootDir string, ref *Reference) (string, string, error) {
-	return "", "", nil
+	//_, err := cache.index.DeleteBlob(m.Digest.Hex())
+	//return err
 }
 
 func (cache *filesystemCache) TableRows() ([][]interface{}, error) {
@@ -206,12 +177,6 @@ func (cache *filesystemCache) printChartSummary(config ocispec.Descriptor) {
 	fmt.Fprintf(cache.out, "Chart Name:       %s\n", metadata.Name)
 	fmt.Fprintf(cache.out, "Chart Version:    %s\n", metadata.Version)
 
-}
-
-// mkdir will create a directory (no error check) and return the path
-func mkdir(dir string) string {
-	os.MkdirAll(dir, 0755)
-	return dir
 }
 
 // extractLayers obtains the content layer from a list of layers
@@ -234,14 +199,6 @@ func extractLayers(layers []ocispec.Descriptor) (ocispec.Descriptor, error) {
 	}
 
 	return contentLayer, nil
-}
-
-// fileExists determines if a file exists
-func fileExists(path string) bool {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return false
-	}
-	return true
 }
 
 // byteCountBinary produces a human-readable file size

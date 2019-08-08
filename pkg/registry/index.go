@@ -147,22 +147,25 @@ func (index *OCIIndex) DeleteBlob(digest string) ([]byte, error) {
 	return blob, err
 }
 
-func (index *OCIIndex) GetManifestByRef(ref string) (ocispec.Manifest, bool) {
-	var manifest OCIManifest
+func (index *OCIIndex) GetManifestByRef(ref string) (*ocispec.Manifest, bool) {
+	var manifestHex string
 	var exists bool
-	for _, m := range index.Manifests {
+	for _, m := range index.Index.Manifests {
 		if r, ok := m.Annotations[ocispec.AnnotationRefName]; ok {
 			if r == ref {
-				manifest = OCIManifest{m}
+				manifestHex = m.Digest.Hex()
 				exists = true
 			}
 		}
 	}
-	r, _ := index.FetchBlob(manifest.Descriptor.Digest.Hex())
+	r, _ := index.FetchBlob(manifestHex)
 
-	var m ocispec.Manifest
-	_ = json.Unmarshal(r, &m)
-	return m, exists
+	var mm ocispec.Manifest
+	err := json.Unmarshal(r, &mm)
+	if err != nil {
+		panic(err)
+	}
+	return &mm, exists
 }
 
 func (index *OCIIndex) DeleteManifestByRef(ref string) (*OCIManifest, bool) {
@@ -170,7 +173,7 @@ func (index *OCIIndex) DeleteManifestByRef(ref string) (*OCIManifest, bool) {
 	var manifest *OCIManifest
 	var deleted bool
 	for _, m := range index.Manifests {
-		if r, ok := manifest.Annotations[ocispec.AnnotationRefName]; ok {
+		if r, ok := m.Annotations[ocispec.AnnotationRefName]; ok {
 			if r == ref {
 				manifest = &OCIManifest{m}
 				deleted = true

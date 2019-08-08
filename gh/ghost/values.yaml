@@ -1,0 +1,60 @@
+allowEmptyPassword: "yes"
+externalDatabase: null
+ghostBlogTitle: User's Blog
+ghostEmail: user@example.com
+ghostPath: /
+ghostProtocol: http
+ghostUsername: user@example.com
+image:
+  pullPolicy: IfNotPresent
+  registry: docker.io
+  repository: bitnami/ghost
+  tag: 2.27.0-debian-9-r0
+ingress:
+  annotations: null
+  certManager: false
+  enabled: false
+  hosts:
+  - name: ghost.local
+    path: /
+    tls: false
+    tlsSecret: ghost.local-tls
+  secrets: null
+mariadb:
+  db:
+    name: bitnami_ghost
+    user: bn_ghost
+  enabled: true
+  master:
+    persistence:
+      accessMode: ReadWriteOnce
+      enabled: true
+      size: 8Gi
+  replication:
+    enabled: false
+persistence:
+  accessMode: ReadWriteOnce
+  enabled: true
+  path: /bitnami
+  size: 8Gi
+resources:
+  requests:
+    cpu: 300m
+    memory: 512Mi
+securityContext:
+  enabled: true
+  fsGroup: 1001
+  runAsUser: 1001
+service:
+  annotations: null
+  externalTrafficPolicy: Cluster
+  nodePorts:
+    http: ""
+  port: 80
+  type: LoadBalancer
+volumePermissions:
+  image:
+    pullPolicy: Always
+    registry: docker.io
+    repository: bitnami/minideb
+    tag: latest
