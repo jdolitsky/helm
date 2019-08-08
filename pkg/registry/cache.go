@@ -23,7 +23,6 @@ import (
 	orascontent "github.com/deislabs/oras/pkg/content"
 	"github.com/docker/go-units"
 	"github.com/opencontainers/go-digest"
-	checksum "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 	"helm.sh/helm/pkg/chart"
@@ -46,6 +45,7 @@ type (
 		out     io.Writer
 		rootDir string
 		store   *orascontent.Memorystore
+		index   *OCIIndex
 	}
 )
 
@@ -55,14 +55,9 @@ func (cache *filesystemCache) LayersToChart(layers []ocispec.Descriptor) (*chart
 		return nil, err
 	}
 
-	_, contentPath := digestPath(filepath.Join(cache.rootDir, "blobs"), contentLayer.Digest)
-	contentRaw, err := ioutil.ReadFile(contentPath)
-	if err != nil {
-		return nil, err
-	}
-
 	// Construct chart object from raw content
-	ch, err := loader.LoadArchive(bytes.NewBuffer(contentRaw))
+	raw, err := cache.index.FetchBlob(contentLayer.Digest.Hex())
+	ch, err := loader.LoadArchive(bytes.NewBuffer(raw))
 	if err != nil {
 		return nil, err
 	}
@@ -108,44 +103,11 @@ func (cache *filesystemCache) ChartToLayers(ch *chart.Chart) (ocispec.Descriptor
 }
 
 func (cache *filesystemCache) LoadReference(ref *Reference) ([]ocispec.Descriptor, error) {
-	var index ocispec.Index
-
-	indexRaw, err := ioutil.ReadFile(filepath.Join(cache.rootDir, "index.json"))
-
-	err = json.Unmarshal(indexRaw, &index)
-	if err != nil {
-		return nil, err
-	}
-
-	found := false
-	var d checksum.Digest
-	for _, manifest := range index.Manifests {
-		if val, ok := manifest.Annotations["org.opencontainers.image.ref.name"]; ok {
-			if val == fmt.Sprintf("%s:%s", ref.Repo, ref.Tag) {
-				found = true
-				d = manifest.Digest
-			}
-		}
-	}
-
-	if !found {
+	refStr := fmt.Sprintf("%s:%s", ref.Repo, ref.Tag)
+	m, exists := cache.index.GetManifestByRef(refStr)
+	if !exists {
 		return nil, errors.New("ref not found")
 	}
-
-	// TODO
-	// 1. Load manifest
-	// 2. return layers
-	_, manifestPath := digestPath(filepath.Join(cache.rootDir, "blobs"), d)
-	manifestRaw, err := ioutil.ReadFile(manifestPath)
-	if err != nil {
-		return nil, err
-	}
-	var m ocispec.Manifest
-	err = json.Unmarshal(manifestRaw, &m)
-	if err != nil {
-		return nil, err
-	}
-
 	return m.Layers, nil
 }
 
@@ -155,11 +117,6 @@ func describeReference(cacheRootDir string, ref *Reference) (string, string, err
 
 func (cache *filesystemCache) StoreReference(ref *Reference, config ocispec.Descriptor, layers []ocispec.Descriptor) (bool, error) {
 	var exists bool
-
-	err := cache.ensureOciLayoutFile()
-	if err != nil {
-		return exists, err
-	}
 
 	// Retrieve content layer
 	contentLayer, err := extractLayers(layers)
@@ -172,13 +129,10 @@ func (cache *filesystemCache) StoreReference(ref *Reference, config ocispec.Desc
 	if !ok {
 		return exists, errors.New("error retrieving content layer")
 	}
-	contentExists, contentPath := digestPath(filepath.Join(cache.rootDir, "blobs"), contentLayer.Digest)
 
-	if !contentExists {
-		err = writeFile(contentPath, contentRaw)
-		if err != nil {
-			return exists, err
-		}
+	_, err = cache.index.StoreBlob(contentRaw)
+	if err != nil {
+		return exists, err
 	}
 
 	// Save config blob
@@ -186,8 +140,7 @@ func (cache *filesystemCache) StoreReference(ref *Reference, config ocispec.Desc
 	if !ok {
 		return exists, errors.New("error retrieving config")
 	}
-	_, configPath := digestPath(filepath.Join(cache.rootDir, "blobs"), config.Digest)
-	err = writeFile(configPath, configRaw)
+	_, err = cache.index.StoreBlob(configRaw)
 	if err != nil {
 		return exists, err
 	}
@@ -238,7 +191,7 @@ func (cache *filesystemCache) describeReference(rootDir string, ref *Reference) 
 }
 
 func (cache *filesystemCache) TableRows() ([][]interface{}, error) {
-	return getRefsSorted(cache.rootDir)
+	return cache.getRefsSorted()
 }
 
 // printChartSummary prints details about a chart layers
@@ -283,39 +236,12 @@ func extractLayers(layers []ocispec.Descriptor) (ocispec.Descriptor, error) {
 	return contentLayer, nil
 }
 
-// createChartFile creates a file under "<chartsdir>" dir which is linked to by ref
-func createChartFile(chartsRootDir string, name string, version string) (string, error) {
-	chartPathDir := filepath.Join(chartsRootDir, name, "versions")
-	chartPath := filepath.Join(chartPathDir, version)
-	if _, err := os.Stat(chartPath); err != nil && os.IsNotExist(err) {
-		os.MkdirAll(chartPathDir, 0755)
-		err := ioutil.WriteFile(chartPath, []byte("-"), 0644)
-		if err != nil {
-			return "", err
-		}
-	}
-	return chartPath, nil
-}
-
-// digestPath returns the path to addressable content, and whether the file exists
-func digestPath(rootDir string, digest checksum.Digest) (bool, string) {
-	path := filepath.Join(rootDir, "sha256", digest.Hex())
-	exists := fileExists(path)
-	return exists, path
-}
-
 // fileExists determines if a file exists
 func fileExists(path string) bool {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return false
 	}
 	return true
-}
-
-// writeFile creates a path, ensuring parent directory
-func writeFile(path string, c []byte) error {
-	os.MkdirAll(filepath.Dir(path), 0755)
-	return ioutil.WriteFile(path, c, 0644)
 }
 
 // byteCountBinary produces a human-readable file size
@@ -341,25 +267,12 @@ func shortDigest(digest string) string {
 }
 
 // getRefsSorted returns a map of all refs stored in a cache
-func getRefsSorted(cacheRootDir string) ([][]interface{}, error) {
+func (cache *filesystemCache) getRefsSorted() ([][]interface{}, error) {
 	refsMap := map[string]map[string]string{}
 
-	var index ocispec.Index
-
-	indexRaw, err := ioutil.ReadFile(filepath.Join(cacheRootDir, "index.json"))
-	if err != nil {
-		return nil, err
-	}
-
-	err = json.Unmarshal(indexRaw, &index)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, manifest := range index.Manifests {
-		if ref, ok := manifest.Annotations["org.opencontainers.image.ref.name"]; ok {
-			_, manifestPath := digestPath(filepath.Join(cacheRootDir, "blobs"), manifest.Digest)
-			manifestRaw, err := ioutil.ReadFile(manifestPath)
+	for _, manifest := range cache.index.Manifests {
+		if ref, ok := manifest.Annotations[ocispec.AnnotationRefName]; ok {
+			manifestRaw, err := cache.index.FetchBlob(manifest.Digest.Hex())
 			if err != nil {
 				return nil, err
 			}
@@ -370,8 +283,7 @@ func getRefsSorted(cacheRootDir string) ([][]interface{}, error) {
 				return nil, err
 			}
 
-			_, configPath := digestPath(filepath.Join(cacheRootDir, "blobs"), manifest.Config.Digest)
-			configRaw, err := ioutil.ReadFile(configPath)
+			configRaw, err := cache.index.FetchBlob(manifest.Config.Digest.Hex())
 			if err != nil {
 				return nil, err
 			}
@@ -393,7 +305,10 @@ func getRefsSorted(cacheRootDir string) ([][]interface{}, error) {
 			refsMap[ref]["digest"] = shortDigest(contentLayer.Digest.Hex())
 			refsMap[ref]["size"] = byteCountBinary(contentLayer.Size)
 
-			_, contentPath := digestPath(filepath.Join(cacheRootDir, "blobs"), contentLayer.Digest)
+			contentPath, err := cache.index.getBlobPath(contentLayer.Digest.Hex())
+			if err != nil {
+				return nil, err
+			}
 			destFileInfo, err := os.Stat(contentPath)
 			if err != nil {
 				return nil, err

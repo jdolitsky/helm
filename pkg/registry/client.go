@@ -18,21 +18,13 @@ package registry // import "helm.sh/helm/pkg/registry"
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"github.com/opencontainers/go-digest"
-	"github.com/opencontainers/image-spec/specs-go"
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"io"
-	"io/ioutil"
-	"os"
-	"path/filepath"
-
 	orascontent "github.com/deislabs/oras/pkg/content"
 	orascontext "github.com/deislabs/oras/pkg/context"
 	"github.com/deislabs/oras/pkg/oras"
 	"github.com/gosuri/uitable"
 	"github.com/sirupsen/logrus"
+	"io"
 
 	"helm.sh/helm/pkg/chart"
 )
@@ -63,6 +55,14 @@ type (
 
 // NewClient returns a new registry client with config
 func NewClient(options *ClientOptions) *Client {
+	index, err := NewOCIIndex(&OCIIndexOptions{
+		RootDir:      options.CacheRootDir,
+		LoadIfExists: true,
+	})
+	if err != nil {
+		// TODO: no no no
+		panic(err)
+	}
 	return &Client{
 		debug:      options.Debug,
 		out:        options.Out,
@@ -72,6 +72,7 @@ func NewClient(options *ClientOptions) *Client {
 			out:     options.Out,
 			rootDir: options.CacheRootDir,
 			store:   orascontent.NewMemoryStore(),
+			index:   index,
 		},
 	}
 }
@@ -147,83 +148,20 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 		return err
 	}
 
-	manifest := ocispec.Manifest{
-		Versioned: specs.Versioned{
-			SchemaVersion: 2, // historical value. does not pertain to OCI or docker version
-		},
-		Config: config,
-		Layers: layers,
-	}
+	raw, digest, err := c.cache.index.AddManifest(config, layers, fmt.Sprintf("%s:%s", ref.Repo, ref.Tag))
 
-	manifestRaw, err := json.Marshal(manifest)
+	_, err = c.cache.index.StoreBlob(raw)
 	if err != nil {
 		return err
 	}
 
-	manifestDescriptor := ocispec.Descriptor{
-		MediaType: ocispec.MediaTypeImageManifest,
-		Digest:    digest.FromBytes(manifestRaw),
-		Size:      int64(len(manifestRaw)),
-		Annotations: map[string]string{
-			"org.opencontainers.image.ref.name": fmt.Sprintf("%s:%s", ref.Repo, ref.Tag),
-		},
-	}
-
-	_, manifestPath := digestPath(filepath.Join(c.cache.rootDir, "blobs"), manifestDescriptor.Digest)
-
-	err = writeFile(manifestPath, manifestRaw)
+	err = c.cache.index.Save()
 	if err != nil {
 		return err
 	}
 
-	err = updateIndexJson(c.cache.rootDir, manifestDescriptor)
-	if err != nil {
-		return err
-	}
-
-	fmt.Fprintf(c.out, "Manifest Digest:  %s\n", manifestDescriptor.Digest.Hex())
+	fmt.Fprintf(c.out, "Manifest Digest:  %s\n", digest)
 	return nil
-}
-
-func updateIndexJson(cacheRootDir string, manifest ocispec.Descriptor) error {
-	indexJsonFilePath := filepath.Join(cacheRootDir, "index.json")
-	if _, err := os.Stat(indexJsonFilePath); os.IsNotExist(err) {
-		tmpIndex := ocispec.Index{}
-		tmpIndexRaw, err := json.Marshal(tmpIndex)
-		if err != nil {
-			return err
-		}
-		err = ioutil.WriteFile(indexJsonFilePath, tmpIndexRaw, 0644)
-		if err != nil {
-			return err
-		}
-	}
-
-	indexJsonRaw, err := ioutil.ReadFile(indexJsonFilePath)
-	if err != nil {
-		return err
-	}
-
-	var origIndex ocispec.Index
-	err = json.Unmarshal(indexJsonRaw, &origIndex)
-	if err != nil {
-		return err
-	}
-
-	origIndex.Manifests = append(origIndex.Manifests, manifest)
-
-	index := ocispec.Index{
-		Versioned: specs.Versioned{
-			SchemaVersion: 2, // historical value. does not pertain to OCI or docker version
-		},
-		Manifests: origIndex.Manifests,
-	}
-	indexRaw, err := json.Marshal(index)
-	if err != nil {
-		return err
-	}
-	err = ioutil.WriteFile(filepath.Join(cacheRootDir, "index.json"), indexRaw, 0644)
-	return err
 }
 
 // LoadChart retrieves a chart object by reference
