@@ -27,6 +27,7 @@ import (
 	"helm.sh/helm/cmd/helm/require"
 	"helm.sh/helm/pkg/action"
 	"helm.sh/helm/pkg/chart/loader"
+	"helm.sh/helm/pkg/cli/values"
 	"helm.sh/helm/pkg/storage/driver"
 )
 
@@ -57,6 +58,7 @@ set for a key called 'foo', the 'newbar' value would take precedence:
 
 func newUpgradeCmd(cfg *action.Configuration, out io.Writer) *cobra.Command {
 	client := action.NewUpgrade(cfg)
+	valueOpts := &values.Options{}
 
 	cmd := &cobra.Command{
 		Use:   "upgrade [RELEASE] [CHART]",
@@ -71,7 +73,8 @@ func newUpgradeCmd(cfg *action.Configuration, out io.Writer) *cobra.Command {
 				client.Version = ">0.0.0-0"
 			}
 
-			if err := client.ValueOptions.MergeValues(settings); err != nil {
+			vals, err := valueOpts.MergeValues(settings)
+			if err != nil {
 				return err
 			}
 
@@ -89,7 +92,6 @@ func newUpgradeCmd(cfg *action.Configuration, out io.Writer) *cobra.Command {
 					fmt.Fprintf(out, "Release %q does not exist. Installing it now.\n", args[0])
 					instClient := action.NewInstall(cfg)
 					instClient.ChartPathOptions = client.ChartPathOptions
-					instClient.ValueOptions = client.ValueOptions
 					instClient.DryRun = client.DryRun
 					instClient.DisableHooks = client.DisableHooks
 					instClient.Timeout = client.Timeout
@@ -98,7 +100,7 @@ func newUpgradeCmd(cfg *action.Configuration, out io.Writer) *cobra.Command {
 					instClient.Namespace = client.Namespace
 					instClient.Atomic = client.Atomic
 
-					_, err := runInstall(args, instClient, out)
+					_, err := runInstall(args, instClient, valueOpts, out)
 					return err
 				}
 			}
@@ -114,7 +116,7 @@ func newUpgradeCmd(cfg *action.Configuration, out io.Writer) *cobra.Command {
 				}
 			}
 
-			resp, err := client.Run(args[0], ch)
+			resp, err := client.Run(args[0], ch, vals)
 			if err != nil {
 				return errors.Wrap(err, "UPGRADE FAILED")
 			}
@@ -147,11 +149,11 @@ func newUpgradeCmd(cfg *action.Configuration, out io.Writer) *cobra.Command {
 	f.DurationVar(&client.Timeout, "timeout", 300*time.Second, "time to wait for any individual Kubernetes operation (like Jobs for hooks)")
 	f.BoolVar(&client.ResetValues, "reset-values", false, "when upgrading, reset the values to the ones built into the chart")
 	f.BoolVar(&client.ReuseValues, "reuse-values", false, "when upgrading, reuse the last release's values and merge in any overrides from the command line via --set and -f. If '--reset-values' is specified, this is ignored.")
-	f.BoolVar(&client.Wait, "wait", false, "if set, will wait until all Pods, PVCs, Services, and minimum number of Pods of a Deployment are in a ready state before marking the release as successful. It will wait for as long as --timeout")
+	f.BoolVar(&client.Wait, "wait", false, "if set, will wait until all Pods, PVCs, Services, and minimum number of Pods of a Deployment, StatefulSet, or ReplicaSet are in a ready state before marking the release as successful. It will wait for as long as --timeout")
 	f.BoolVar(&client.Atomic, "atomic", false, "if set, upgrade process rolls back changes made in case of failed upgrade. The --wait flag will be set automatically if --atomic is used")
 	f.IntVar(&client.MaxHistory, "history-max", 0, "limit the maximum number of revisions saved per release. Use 0 for no limit.")
 	addChartPathOptionsFlags(f, &client.ChartPathOptions)
-	addValueOptionsFlags(f, &client.ValueOptions)
+	addValueOptionsFlags(f, valueOpts)
 
 	return cmd
 }
