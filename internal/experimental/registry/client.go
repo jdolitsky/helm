@@ -135,7 +135,7 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 	if err != nil {
 		return err
 	}
-	_, err = c.store.StoreReference(ref, config, layers)
+	c.store.AddReference(ref.FullName(), layers[0])
 	if err != nil {
 		return err
 	}

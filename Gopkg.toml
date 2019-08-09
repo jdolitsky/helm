@@ -44,7 +44,7 @@
 
 [[constraint]]
   name = "github.com/deislabs/oras"
-  version = "0.5.0"
+  branch = "shizh/oci_store"
 
 [[constraint]]
   name = "github.com/sirupsen/logrus"

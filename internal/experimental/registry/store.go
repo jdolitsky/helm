@@ -27,6 +27,7 @@ import (
 
 	//"github.com/opencontainers/go-digest"
 	//"github.com/opencontainers/image-spec/specs-go"
+	orascontent "github.com/deislabs/oras/pkg/content"
 	"github.com/docker/go-units"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	//"github.com/pkg/errors"
@@ -45,13 +46,19 @@ var (
 type (
 	// Authorizer handles registry auth operations
 	Store struct {
-		//orascontent.OCIStore
-		RootDir string
+		*orascontent.OCIStore
 	}
 )
 
 func NewStore(rootDir string) (*Store, error) {
-	return &Store{RootDir: rootDir}, nil
+	ociStore, err := orascontent.NewOCIStore(rootDir)
+	if err != nil {
+		return nil, err
+	}
+	store := Store{
+		OCIStore: ociStore,
+	}
+	return &store, nil
 }
 
 func (store *Store) LoadReference(ref *Reference) ([]ocispec.Descriptor, error) {
@@ -74,8 +81,9 @@ func (store *Store) DeleteBlob(digest string) ([]byte, error) {
 
 }
 
+/*
 func (store *Store) StoreReference(ref *Reference, config ocispec.Descriptor, layers []ocispec.Descriptor) (bool, error) {
-
+	store.AddReference(ref, )
 	//fmt.Fprintf(cache.out, "ref:     %s\n", ref.FullName())
 	//fmt.Fprintf(cache.out, "digest:  %s\n", contentLayer.Digest.Hex())
 	//fmt.Fprintf(cache.out, "size:    %s\n", byteCountBinary(contentLayer.Size))
@@ -83,6 +91,8 @@ func (store *Store) StoreReference(ref *Reference, config ocispec.Descriptor, la
 	//fmt.Fprintf(cache.out, "version: %s\n", metadata.Version)
 
 }
+*/
+
 
 func (store *Store) ChartToLayers(ch *chart.Chart) (ocispec.Descriptor, []ocispec.Descriptor, error) {
 
