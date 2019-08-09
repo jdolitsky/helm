@@ -120,9 +120,9 @@ func (c *Client) PullChart(ref *Reference) error {
 		return err
 	}
 	if !exists {
-		fmt.Fprintf(c.out, "Status: Downloaded newer chart for %s:%s\n", ref.Repo, ref.Tag)
+		fmt.Fprintf(c.out, "Status: Downloaded newer chart for %s\n", ref.FullName())
 	} else {
-		fmt.Fprintf(c.out, "Status: Chart is up to date for %s:%s\n", ref.Repo, ref.Tag)
+		fmt.Fprintf(c.out, "Status: Chart is up to date for %s\n", ref.FullName())
 	}
 	return nil
 }

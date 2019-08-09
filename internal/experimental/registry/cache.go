@@ -138,7 +138,7 @@ func (cache *filesystemCache) StoreReference(ref *Reference, config ocispec.Desc
 	if !ok {
 		return exists, errors.New("error retrieving config")
 	}
-	_, err = cache.index.StoreBlob(configRaw)
+	_, err = cache.store.StoreBlob(configRaw)
 	if err != nil {
 		return exists, err
 	}
@@ -220,7 +220,7 @@ func (cache *filesystemCache) getRefsSorted() ([][]interface{}, error) {
 
 	for _, manifest := range cache.store.GetAllManifests {
 		if ref, ok := manifest.Annotations[ocispec.AnnotationRefName]; ok {
-			manifestRaw, err := cache.index.FetchBlob(manifest.Digest.Hex())
+			manifestRaw, err := cache.store.FetchBlob(manifest.Digest.Hex())
 			if err != nil {
 				return nil, err
 			}
@@ -231,7 +231,7 @@ func (cache *filesystemCache) getRefsSorted() ([][]interface{}, error) {
 				return nil, err
 			}
 
-			configRaw, err := cache.index.FetchBlob(manifest.Config.Digest.Hex())
+			configRaw, err := cache.store.FetchBlob(manifest.Config.Digest.Hex())
 			if err != nil {
 				return nil, err
 			}
