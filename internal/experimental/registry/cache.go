@@ -20,6 +20,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/ioutil"
+	"os"
+	"path/filepath"
+	"sort"
+	"time"
+
 	orascontent "github.com/deislabs/oras/pkg/content"
 	"github.com/docker/go-units"
 	"github.com/opencontainers/go-digest"
@@ -28,12 +35,6 @@ import (
 	"helm.sh/helm/pkg/chart"
 	"helm.sh/helm/pkg/chart/loader"
 	"helm.sh/helm/pkg/chartutil"
-	"io"
-	"io/ioutil"
-	"os"
-	"path/filepath"
-	"sort"
-	"time"
 )
 
 var (
@@ -42,10 +43,8 @@ var (
 
 type (
 	filesystemCache struct {
-		out     io.Writer
-		rootDir string
-		store   *orascontent.Memorystore
-		index   *OCIIndex
+		out   io.Writer
+		store *orascontent.OCIStore
 	}
 )
 
@@ -55,8 +54,12 @@ func (cache *filesystemCache) LayersToChart(layers []ocispec.Descriptor) (*chart
 		return nil, err
 	}
 
+	raw, err := cache.store.FetchBlob(contentLayer.Digest.Hex())
+	if err != nil {
+		return nil, err
+	}
+
 	// Construct chart object from raw content
-	raw, err := cache.index.FetchBlob(contentLayer.Digest.Hex())
 	ch, err := loader.LoadArchive(bytes.NewBuffer(raw))
 	if err != nil {
 		return nil, err
@@ -83,7 +86,7 @@ func (cache *filesystemCache) ChartToLayers(ch *chart.Chart) (ocispec.Descriptor
 		Digest:    digest.FromBytes(configRaw),
 		Size:      int64(len(configRaw)),
 	}
-	cache.store.Set(config, configRaw)
+	cache.store.StoreBlob(config, configRaw)
 
 	destDir := filepath.Join(cache.rootDir, ".build")
 	os.MkdirAll(destDir, 0755)
@@ -104,8 +107,7 @@ func (cache *filesystemCache) ChartToLayers(ch *chart.Chart) (ocispec.Descriptor
 }
 
 func (cache *filesystemCache) LoadReference(ref *Reference) ([]ocispec.Descriptor, error) {
-	refStr := fmt.Sprintf("%s:%s", ref.Repo, ref.Tag)
-	m, exists := cache.index.GetManifestByRef(refStr)
+	m, exists := cache.store.GetManifestByRef(ref.FullName())
 	if !exists {
 		return nil, errors.New("ref not found")
 	}
@@ -113,21 +115,20 @@ func (cache *filesystemCache) LoadReference(ref *Reference) ([]ocispec.Descripto
 }
 
 func (cache *filesystemCache) StoreReference(ref *Reference, config ocispec.Descriptor, layers []ocispec.Descriptor) (bool, error) {
-	var exists bool
 
 	// Retrieve content layer
 	contentLayer, err := extractLayers(layers)
 	if err != nil {
-		return exists, err
+		return false, err
 	}
 
 	// Save content blob
 	_, contentRaw, ok := cache.store.Get(contentLayer)
 	if !ok {
-		return exists, errors.New("error retrieving content layer")
+		return false, errors.New("error retrieving content layer")
 	}
 
-	_, err = cache.index.StoreBlob(contentRaw)
+	exists, err := cache.store.StoreBlob(contentRaw)
 	if err != nil {
 		return exists, err
 	}
@@ -142,41 +143,31 @@ func (cache *filesystemCache) StoreReference(ref *Reference, config ocispec.Desc
 		return exists, err
 	}
 
-	fmt.Fprintf(cache.out, "Reference:        %s:%s\n", ref.Repo, ref.Tag)
-	cache.printChartSummary(config)
+	metadata := chart.Metadata{}
 
-	fmt.Fprintf(cache.out, "Content Size:     %s\n", byteCountBinary(contentLayer.Size))
-	fmt.Fprintf(cache.out, "Content Digest:   %s\n", contentLayer.Digest.Hex())
-	fmt.Fprintf(cache.out, "Config Digest:    %s\n", config.Digest.Hex())
+	// TODO handle errors here
+	_, content, _ := cache.store.Get(config)
+	err := json.Unmarshal(content, &metadata)
+	if err != nil {
+		return exists, err
+	}
+
+	fmt.Fprintf(cache.out, "ref:     %s\n", ref.FullName())
+	fmt.Fprintf(cache.out, "digest:  %s\n", contentLayer.Digest.Hex())
+	fmt.Fprintf(cache.out, "size:    %s\n", byteCountBinary(contentLayer.Size))
+	fmt.Fprintf(cache.out, "name:    %s\n", metadata.Name)
+	fmt.Fprintf(cache.out, "version: %s\n", metadata.Version)
 
 	return exists, nil
 }
 
 func (cache *filesystemCache) DeleteReference(ref *Reference) error {
-	refStr := fmt.Sprintf("%s:%s", ref.Repo, ref.Tag)
-	_, _ = cache.index.DeleteManifestByRef(refStr)
-	cache.index.Save()
-	return nil
-	//_, err := cache.index.DeleteBlob(m.Digest.Hex())
-	//return err
+	_, err := cache.store.DeleteManifestByRef(ref.FullName())
+	return err
 }
 
 func (cache *filesystemCache) TableRows() ([][]interface{}, error) {
 	return cache.getRefsSorted()
-}
-
-// printChartSummary prints details about a chart layers
-func (cache *filesystemCache) printChartSummary(config ocispec.Descriptor) {
-
-	metadata := chart.Metadata{}
-
-	// TODO handle errors here
-	_, content, _ := cache.store.Get(config)
-	json.Unmarshal(content, &metadata)
-
-	fmt.Fprintf(cache.out, "Chart Name:       %s\n", metadata.Name)
-	fmt.Fprintf(cache.out, "Chart Version:    %s\n", metadata.Version)
-
 }
 
 // extractLayers obtains the content layer from a list of layers
@@ -227,7 +218,7 @@ func shortDigest(digest string) string {
 func (cache *filesystemCache) getRefsSorted() ([][]interface{}, error) {
 	refsMap := map[string]map[string]string{}
 
-	for _, manifest := range cache.index.Manifests {
+	for _, manifest := range cache.store.GetAllManifests {
 		if ref, ok := manifest.Annotations[ocispec.AnnotationRefName]; ok {
 			manifestRaw, err := cache.index.FetchBlob(manifest.Digest.Hex())
 			if err != nil {
@@ -262,7 +253,7 @@ func (cache *filesystemCache) getRefsSorted() ([][]interface{}, error) {
 			refsMap[ref]["digest"] = shortDigest(contentLayer.Digest.Hex())
 			refsMap[ref]["size"] = byteCountBinary(contentLayer.Size)
 
-			contentPath, err := cache.index.getBlobPath(contentLayer.Digest.Hex())
+			contentPath, err := cache.store.getBlobPath(contentLayer.Digest.Hex())
 			if err != nil {
 				return nil, err
 			}

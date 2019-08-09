@@ -55,14 +55,6 @@ type (
 
 // NewClient returns a new registry client with config
 func NewClient(options *ClientOptions) *Client {
-	index, err := NewOCIIndex(&OCIIndexOptions{
-		RootDir:      options.CacheRootDir,
-		LoadIfExists: true,
-	})
-	if err != nil {
-		// TODO: no no no
-		panic(err)
-	}
 	return &Client{
 		debug:      options.Debug,
 		out:        options.Out,
@@ -70,9 +62,7 @@ func NewClient(options *ClientOptions) *Client {
 		authorizer: options.Authorizer,
 		cache: &filesystemCache{
 			out:     options.Out,
-			rootDir: options.CacheRootDir,
-			store:   orascontent.NewMemoryStore(),
-			index:   index,
+			store:   orascontent.NewOCIStore(options.CacheRootDir),
 		},
 	}
 }
@@ -148,19 +138,16 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 		return err
 	}
 
-	raw, digest, err := c.cache.index.AddManifest(config, layers, fmt.Sprintf("%s:%s", ref.Repo, ref.Tag))
-
-	_, err = c.cache.index.StoreBlob(raw)
+	digest, err := c.cache.store.AddManifest(config, layers, ref.FullName())
 	if err != nil {
 		return err
 	}
 
-	err = c.cache.index.Save()
+	_, err = c.cache.store.StoreBlob(raw)
 	if err != nil {
 		return err
 	}
 
-	fmt.Fprintf(c.out, "Manifest Digest:  %s\n", digest)
 	return nil
 }
 
