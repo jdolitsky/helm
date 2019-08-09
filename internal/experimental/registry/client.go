@@ -103,8 +103,13 @@ func (c *Client) PushChart(ref *Reference) error {
 	for _, layer := range layers {
 		totalSize += layer.Size
 	}
+	s := ""
+	numLayers := len(layers)
+	if 1 < numLayers {
+		s = "s"
+	}
 	fmt.Fprintf(c.out,
-		"%s: pushed to remote (%s total)\n", ref.Tag, byteCountBinary(totalSize))
+		"%s: pushed to remote (%d layer%s, %s total)\n", ref.Tag, numLayers, s, byteCountBinary(totalSize))
 	return nil
 }
 
