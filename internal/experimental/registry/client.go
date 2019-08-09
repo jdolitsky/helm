@@ -19,14 +19,14 @@ package registry // import "helm.sh/helm/internal/experimental/registry"
 import (
 	"context"
 	"fmt"
-	orascontent "github.com/deislabs/oras/pkg/content"
+	"io"
+
+	"helm.sh/helm/pkg/chart"
+
 	orascontext "github.com/deislabs/oras/pkg/context"
 	"github.com/deislabs/oras/pkg/oras"
 	"github.com/gosuri/uitable"
 	"github.com/sirupsen/logrus"
-	"io"
-
-	"helm.sh/helm/pkg/chart"
 )
 
 const (
@@ -36,11 +36,11 @@ const (
 type (
 	// ClientOptions is used to construct a new client
 	ClientOptions struct {
-		Debug        bool
-		Out          io.Writer
-		Authorizer   Authorizer
-		Resolver     Resolver
-		CacheRootDir string
+		Debug      bool
+		Out        io.Writer
+		Authorizer Authorizer
+		Resolver   Resolver
+		Store      Store
 	}
 
 	// Client works with OCI-compliant registries and local Helm chart cache
@@ -49,7 +49,7 @@ type (
 		out        io.Writer
 		authorizer Authorizer
 		resolver   Resolver
-		cache      *filesystemCache // TODO: something more robust
+		store      Store
 	}
 )
 
@@ -60,10 +60,7 @@ func NewClient(options *ClientOptions) *Client {
 		out:        options.Out,
 		resolver:   options.Resolver,
 		authorizer: options.Authorizer,
-		cache: &filesystemCache{
-			out:     options.Out,
-			store:   orascontent.NewOCIStore(options.CacheRootDir),
-		},
+		store:      options.Store,
 	}
 }
 
@@ -90,11 +87,11 @@ func (c *Client) Logout(hostname string) error {
 // PushChart uploads a chart to a registry
 func (c *Client) PushChart(ref *Reference) error {
 	fmt.Fprintf(c.out, "The push refers to repository [%s]\n", ref.Repo)
-	layers, err := c.cache.LoadReference(ref)
+	layers, err := c.store.LoadReference(ref)
 	if err != nil {
 		return err
 	}
-	_, err = oras.Push(c.newContext(), c.resolver, ref.String(), c.cache.store, layers,
+	_, err = oras.Push(c.newContext(), c.resolver, ref.String(), c.store, layers,
 		oras.WithConfigMediaType(HelmChartConfigMediaType))
 	if err != nil {
 		return err
@@ -116,11 +113,11 @@ func (c *Client) PushChart(ref *Reference) error {
 // PullChart downloads a chart from a registry
 func (c *Client) PullChart(ref *Reference) error {
 	fmt.Fprintf(c.out, "%s: Pulling from %s\n", ref.Tag, ref.Repo)
-	config, layers, err := oras.Pull(c.newContext(), c.resolver, ref.String(), c.cache.store, oras.WithAllowedMediaTypes(KnownMediaTypes()))
+	config, layers, err := oras.Pull(c.newContext(), c.resolver, ref.String(), c.store, oras.WithAllowedMediaTypes(KnownMediaTypes()))
 	if err != nil {
 		return err
 	}
-	exists, err := c.cache.StoreReference(ref, config, layers)
+	exists, err := c.store.StoreReference(ref, config, layers)
 	if err != nil {
 		return err
 	}
@@ -134,21 +131,21 @@ func (c *Client) PullChart(ref *Reference) error {
 
 // SaveChart stores a copy of chart in local cache
 func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
-	config, layers, err := c.cache.ChartToLayers(ch)
+	config, layers, err := c.store.ChartToLayers(ch)
 	if err != nil {
 		return err
 	}
-	_, err = c.cache.StoreReference(ref, config, layers)
-	if err != nil {
-		return err
-	}
-
-	digest, err := c.cache.store.AddManifest(config, layers, ref.FullName())
+	_, err = c.store.StoreReference(ref, config, layers)
 	if err != nil {
 		return err
 	}
 
-	_, err = c.cache.store.StoreBlob(raw)
+	raw, _, err := c.store.AddManifest(config, layers, ref.FullName())
+	if err != nil {
+		return err
+	}
+
+	_, err = c.store.StoreBlob(raw)
 	if err != nil {
 		return err
 	}
@@ -158,17 +155,17 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 
 // LoadChart retrieves a chart object by reference
 func (c *Client) LoadChart(ref *Reference) (*chart.Chart, error) {
-	layers, err := c.cache.LoadReference(ref)
+	layers, err := c.store.LoadReference(ref)
 	if err != nil {
 		return nil, err
 	}
-	ch, err := c.cache.LayersToChart(layers)
+	ch, err := c.store.LayersToChart(layers)
 	return ch, err
 }
 
 // RemoveChart deletes a locally saved chart
 func (c *Client) RemoveChart(ref *Reference) error {
-	err := c.cache.DeleteReference(ref)
+	err := c.store.DeleteReference(ref)
 	if err != nil {
 		return err
 	}
@@ -181,7 +178,7 @@ func (c *Client) PrintChartTable() error {
 	table := uitable.New()
 	table.MaxColWidth = 60
 	table.AddRow("REF", "NAME", "VERSION", "DIGEST", "SIZE", "CREATED")
-	rows, err := c.cache.TableRows()
+	rows, err := c.store.TableRows()
 	if err != nil {
 		return err
 	}

@@ -17,24 +17,25 @@ limitations under the License.
 package registry // import "helm.sh/helm/internal/experimental/registry"
 
 import (
-	"bytes"
+	//"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
-	"io/ioutil"
 	"os"
-	"path/filepath"
 	"sort"
 	"time"
 
-	orascontent "github.com/deislabs/oras/pkg/content"
+	//"github.com/opencontainers/go-digest"
+	//"github.com/opencontainers/image-spec/specs-go"
 	"github.com/docker/go-units"
-	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/pkg/errors"
+	//"github.com/pkg/errors"
 	"helm.sh/helm/pkg/chart"
-	"helm.sh/helm/pkg/chart/loader"
-	"helm.sh/helm/pkg/chartutil"
+	//"helm.sh/helm/pkg/chart/loader"
+	//"helm.sh/helm/pkg/chartutil"
+	//"io/ioutil"
+	//"os"
+	//"path/filepath"
 )
 
 var (
@@ -42,132 +43,65 @@ var (
 )
 
 type (
-	filesystemCache struct {
-		out   io.Writer
-		store *orascontent.OCIStore
+	// Authorizer handles registry auth operations
+	Store struct {
+		//orascontent.OCIStore
+		RootDir string
 	}
 )
 
-func (cache *filesystemCache) LayersToChart(layers []ocispec.Descriptor) (*chart.Chart, error) {
-	contentLayer, err := extractLayers(layers)
-	if err != nil {
-		return nil, err
-	}
-
-	raw, err := cache.store.FetchBlob(contentLayer.Digest.Hex())
-	if err != nil {
-		return nil, err
-	}
-
-	// Construct chart object from raw content
-	ch, err := loader.LoadArchive(bytes.NewBuffer(raw))
-	if err != nil {
-		return nil, err
-	}
-
-	return ch, nil
+func NewStore(rootDir string) (*Store, error) {
+	return &Store{RootDir: rootDir}, nil
 }
 
-func (cache *filesystemCache) ChartToLayers(ch *chart.Chart) (ocispec.Descriptor, []ocispec.Descriptor, error) {
-	var config ocispec.Descriptor
+func (store *Store) LoadReference(ref *Reference) ([]ocispec.Descriptor, error) {
 
-	if err := ch.Validate(); err != nil {
-		return config, nil, err
-	}
-
-	// Set the metadata as config content
-	configRaw, err := json.Marshal(ch.Metadata)
-	if err != nil {
-		return config, nil, errors.Wrap(err, "could not convert metadata to json")
-	}
-
-	config = ocispec.Descriptor{
-		MediaType: ocispec.MediaTypeImageConfig,
-		Digest:    digest.FromBytes(configRaw),
-		Size:      int64(len(configRaw)),
-	}
-	cache.store.StoreBlob(config, configRaw)
-
-	destDir := filepath.Join(cache.rootDir, ".build")
-	os.MkdirAll(destDir, 0755)
-	tmpFile, err := chartutil.Save(ch, destDir)
-	defer os.Remove(tmpFile)
-	if err != nil {
-		return config, nil, errors.Wrap(err, "failed to save")
-	}
-	contentRaw, err := ioutil.ReadFile(tmpFile)
-	if err != nil {
-		return config, nil, err
-	}
-
-	contentLayer := cache.store.Add("", HelmChartContentLayerMediaType, contentRaw)
-	layers := []ocispec.Descriptor{contentLayer}
-
-	return config, layers, nil
 }
 
-func (cache *filesystemCache) LoadReference(ref *Reference) ([]ocispec.Descriptor, error) {
-	m, exists := cache.store.GetManifestByRef(ref.FullName())
-	if !exists {
-		return nil, errors.New("ref not found")
-	}
-	return m.Layers, nil
+func (store *Store) GetManifestByRef(ref string) (*ocispec.Manifest, bool) {
+
 }
 
-func (cache *filesystemCache) StoreReference(ref *Reference, config ocispec.Descriptor, layers []ocispec.Descriptor) (bool, error) {
+func (store *Store) StoreBlob(blob []byte) (string, error) {
 
-	// Retrieve content layer
-	contentLayer, err := extractLayers(layers)
-	if err != nil {
-		return false, err
-	}
-
-	// Save content blob
-	_, contentRaw, ok := cache.store.Get(contentLayer)
-	if !ok {
-		return false, errors.New("error retrieving content layer")
-	}
-
-	exists, err := cache.store.StoreBlob(contentRaw)
-	if err != nil {
-		return exists, err
-	}
-
-	// Save config blob
-	_, configRaw, ok := cache.store.Get(config)
-	if !ok {
-		return exists, errors.New("error retrieving config")
-	}
-	_, err = cache.store.StoreBlob(configRaw)
-	if err != nil {
-		return exists, err
-	}
-
-	metadata := chart.Metadata{}
-
-	// TODO handle errors here
-	_, content, _ := cache.store.Get(config)
-	err := json.Unmarshal(content, &metadata)
-	if err != nil {
-		return exists, err
-	}
-
-	fmt.Fprintf(cache.out, "ref:     %s\n", ref.FullName())
-	fmt.Fprintf(cache.out, "digest:  %s\n", contentLayer.Digest.Hex())
-	fmt.Fprintf(cache.out, "size:    %s\n", byteCountBinary(contentLayer.Size))
-	fmt.Fprintf(cache.out, "name:    %s\n", metadata.Name)
-	fmt.Fprintf(cache.out, "version: %s\n", metadata.Version)
-
-	return exists, nil
 }
 
-func (cache *filesystemCache) DeleteReference(ref *Reference) error {
-	_, err := cache.store.DeleteManifestByRef(ref.FullName())
-	return err
+func (store *Store) FetchBlob(digest string) ([]byte, error) {
+
 }
 
-func (cache *filesystemCache) TableRows() ([][]interface{}, error) {
-	return cache.getRefsSorted()
+func (store *Store) DeleteBlob(digest string) ([]byte, error) {
+
+}
+
+func (store *Store) StoreReference(ref *Reference, config ocispec.Descriptor, layers []ocispec.Descriptor) (bool, error) {
+
+	//fmt.Fprintf(cache.out, "ref:     %s\n", ref.FullName())
+	//fmt.Fprintf(cache.out, "digest:  %s\n", contentLayer.Digest.Hex())
+	//fmt.Fprintf(cache.out, "size:    %s\n", byteCountBinary(contentLayer.Size))
+	//fmt.Fprintf(cache.out, "name:    %s\n", metadata.Name)
+	//fmt.Fprintf(cache.out, "version: %s\n", metadata.Version)
+
+}
+
+func (store *Store) ChartToLayers(ch *chart.Chart) (ocispec.Descriptor, []ocispec.Descriptor, error) {
+
+}
+
+func (store *Store) AddManifest(config ocispec.Descriptor, layers []ocispec.Descriptor, ref string) ([]byte, string, error) {
+
+}
+
+func (store *Store) DeleteReference(ref *Reference) error {
+
+}
+
+func (store *Store) LayersToChart(layers []ocispec.Descriptor) (*chart.Chart, error) {
+
+}
+
+func (store *Store) TableRows() ([][]interface{}, error) {
+
 }
 
 // extractLayers obtains the content layer from a list of layers
@@ -215,12 +149,12 @@ func shortDigest(digest string) string {
 }
 
 // getRefsSorted returns a map of all refs stored in a cache
-func (cache *filesystemCache) getRefsSorted() ([][]interface{}, error) {
+func (store *Store) getRefsSorted() ([][]interface{}, error) {
 	refsMap := map[string]map[string]string{}
 
-	for _, manifest := range cache.store.GetAllManifests {
+	for _, manifest := range store.GetAllManifests {
 		if ref, ok := manifest.Annotations[ocispec.AnnotationRefName]; ok {
-			manifestRaw, err := cache.store.FetchBlob(manifest.Digest.Hex())
+			manifestRaw, err := store.FetchBlob(manifest.Digest.Hex())
 			if err != nil {
 				return nil, err
 			}
@@ -231,7 +165,7 @@ func (cache *filesystemCache) getRefsSorted() ([][]interface{}, error) {
 				return nil, err
 			}
 
-			configRaw, err := cache.store.FetchBlob(manifest.Config.Digest.Hex())
+			configRaw, err := store.FetchBlob(manifest.Config.Digest.Hex())
 			if err != nil {
 				return nil, err
 			}
@@ -253,7 +187,7 @@ func (cache *filesystemCache) getRefsSorted() ([][]interface{}, error) {
 			refsMap[ref]["digest"] = shortDigest(contentLayer.Digest.Hex())
 			refsMap[ref]["size"] = byteCountBinary(contentLayer.Size)
 
-			contentPath, err := cache.store.getBlobPath(contentLayer.Digest.Hex())
+			contentPath, err := store.getBlobPath(contentLayer.Digest.Hex())
 			if err != nil {
 				return nil, err
 			}
