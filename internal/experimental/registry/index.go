@@ -14,22 +14,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package registry // import "helm.sh/helm/pkg/registry"
+package registry // import "helm.sh/helm/internal/experimental/registry"
 
 import (
-	//"crypto/sha1"
 	"crypto/sha256"
-	//"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	//"fmt"
-	"github.com/opencontainers/go-digest"
-	"github.com/opencontainers/image-spec/specs-go"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 
+	"github.com/opencontainers/go-digest"
+	"github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -58,7 +55,7 @@ type (
 
 func NewOCIIndex(options *OCIIndexOptions) (*OCIIndex, error) {
 	index := OCIIndex{
-		Index:   &ocispec.Index{
+		Index: &ocispec.Index{
 			Versioned: specs.Versioned{
 				SchemaVersion: 2, // historical value. does not pertain to OCI or docker version
 			},

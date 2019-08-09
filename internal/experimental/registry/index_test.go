@@ -22,14 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestConstants(t *testing.T) {
+func TestIndex(t *testing.T) {
 	is := assert.New(t)
-
-	index := NewIndex()
-	_, err := NewIndexFromFilePath("index.json")
-	is.NoError(err)
-}
-
-func createTestIndexFile(raw string) (string, error) {
-
+	is.NoError(nil)
 }
