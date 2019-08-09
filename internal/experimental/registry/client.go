@@ -21,12 +21,12 @@ import (
 	"fmt"
 	"io"
 
-	"helm.sh/helm/pkg/chart"
-
 	orascontext "github.com/deislabs/oras/pkg/context"
 	"github.com/deislabs/oras/pkg/oras"
 	"github.com/gosuri/uitable"
 	"github.com/sirupsen/logrus"
+
+	"helm.sh/helm/pkg/chart"
 )
 
 const (
