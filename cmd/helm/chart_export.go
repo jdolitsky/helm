@@ -37,10 +37,11 @@ func newChartExportCmd(cfg *action.Configuration, out io.Writer) *cobra.Command 
 	client := action.NewChartExport(cfg)
 
 	cmd := &cobra.Command{
-		Use:   "export [ref]",
-		Short: "export a chart to directory",
-		Long:  chartExportDesc,
-		Args:  require.MinimumNArgs(1),
+		Use:    "export [ref]",
+		Short:  "export a chart to directory",
+		Long:   chartExportDesc,
+		Args:   require.MinimumNArgs(1),
+		Hidden: !FeatureGateOCI.IsEnabled(),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ref := args[0]
 			return client.Run(out, ref)
