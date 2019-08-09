@@ -85,7 +85,7 @@ func (cache *filesystemCache) ChartToLayers(ch *chart.Chart) (ocispec.Descriptor
 	}
 	cache.store.Set(config, configRaw)
 
-	destDir := filepath.Join(cache.rootDir, "blobs", ".build")
+	destDir := filepath.Join(cache.rootDir, ".build")
 	os.MkdirAll(destDir, 0755)
 	tmpFile, err := chartutil.Save(ch, destDir)
 	defer os.Remove(tmpFile)

@@ -79,7 +79,7 @@ func NewOCIIndex(options *OCIIndexOptions) (*OCIIndex, error) {
 }
 
 func (index *OCIIndex) GetPath() string {
-	return filepath.Join(index.RootDir, OCIIndexFilename)
+	return filepath.Join(index.RootDir, "cache", OCIIndexFilename)
 }
 
 func (index *OCIIndex) AddManifest(config ocispec.Descriptor, layers []ocispec.Descriptor, ref string) ([]byte, string, error) {
@@ -195,7 +195,7 @@ func (index *OCIIndex) Save() error {
 	}
 
 	// Write to index.json
-	indexPath := filepath.Join(index.RootDir, OCIIndexFilename)
+	indexPath := filepath.Join(index.RootDir, "cache", OCIIndexFilename)
 	indexRaw, err := json.Marshal(index)
 	if err != nil {
 		return err
@@ -205,7 +205,7 @@ func (index *OCIIndex) Save() error {
 }
 
 func (index *OCIIndex) ensureOCILayoutFile() error {
-	layoutPath := filepath.Join(index.RootDir, ocispec.ImageLayoutFile)
+	layoutPath := filepath.Join(index.RootDir, "cache", ocispec.ImageLayoutFile)
 	if _, err := os.Stat(layoutPath); os.IsNotExist(err) {
 		layout := &ocispec.ImageLayout{
 			Version: ocispec.ImageLayoutVersion,
@@ -235,6 +235,6 @@ func (index *OCIIndex) getBlobPath(digest string) (string, error) {
 	if index.RootDir == "" {
 		return "", errors.New("could not determine blob path due to missing index root dir")
 	}
-	path := filepath.Join(index.RootDir, "blobs", "sha256", digest)
+	path := filepath.Join(index.RootDir, "cache", "blobs", "sha256", digest)
 	return path, nil
 }
