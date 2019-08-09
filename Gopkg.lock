@@ -264,8 +264,7 @@
   version = "v1.1.1"
 
 [[projects]]
-  branch = "shizh/oci_store"
-  digest = "1:5a2357def00cf341902ef367cfd215582e16f58d3f2a02ec267fea8b6e07575b"
+  digest = "1:543d5301a51341bbdaba9ddf14ae52ffcc8302fc5e79b01f1954c31f02a4aac5"
   name = "github.com/deislabs/oras"
   packages = [
     "pkg/auth",
@@ -275,7 +274,8 @@
     "pkg/oras",
   ]
   pruneopts = "T"
-  revision = "edddd2a2ea7b6278440413abb053f9b8235c024a"
+  revision = "b285197778e05cd348abb8ff50faf0ef7e3554a2"
+  version = "v0.6.0"
 
 [[projects]]
   digest = "1:6b014c67cb522566c30ef02116f9acb50cd60954708cf92c6654e2985696db18"
