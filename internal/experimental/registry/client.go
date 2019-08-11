@@ -26,6 +26,7 @@ import (
 	"time"
 
 	auth "github.com/deislabs/oras/pkg/auth/docker"
+	"github.com/deislabs/oras/pkg/oras"
 	"github.com/docker/go-units"
 	"github.com/gosuri/uitable"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -132,7 +133,10 @@ func (c *Client) Logout(hostname string) error {
 
 // PushChart uploads a chart to a registry
 func (c *Client) PushChart(ref *Reference) error {
-	return nil
+	desc, _ := c.cache.FetchDescriptorByRef(ref.FullName())
+	_, err := oras.Push(ctx(c.out, c.debug), c.resolver, ref.FullName(),
+		c.cache.ociStore, []ocispec.Descriptor{*desc}, oras.WithNameValidation(nil),)
+	return err
 }
 
 // PullChart downloads a chart from a registry

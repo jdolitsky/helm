@@ -112,6 +112,19 @@ func (cache *Cache) FetchChartByRef(ref string) (*chart.Chart, bool, error) {
 	return &ch, exists, nil
 }
 
+func (cache *Cache) FetchDescriptorByRef(ref string) (*ocispec.Descriptor, bool) {
+	var desc ocispec.Descriptor
+	var exists bool
+	for _, manifest := range cache.ociStore.ListReferences() {
+		if manifest.Annotations[ocispec.AnnotationRefName] == ref {
+			desc = manifest
+			exists = true
+			break
+		}
+	}
+	return &desc, exists
+}
+
 func (cache *Cache) RemoveChartByRef(ref string) (bool, error) {
 	_, exists, err := cache.FetchChartByRef(ref)
 	if err != nil || !exists {
