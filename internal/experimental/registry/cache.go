@@ -28,6 +28,7 @@ import (
 	"sort"
 
 	"github.com/containerd/containerd/content"
+	"github.com/containerd/containerd/errdefs"
 	orascontent "github.com/deislabs/oras/pkg/content"
 	"github.com/opencontainers/go-digest"
 	"github.com/opencontainers/image-spec/specs-go"
@@ -78,22 +79,22 @@ func NewCache(options *CacheOptions) (*Cache, error) {
 }
 
 func (cache *Cache) StoreChartAtRef(ch *chart.Chart, ref string) (*ocispec.Descriptor, bool, error) {
-	var exists bool
-	config, err := cache.saveChartConfig(ch)
+	config, _, err := cache.saveChartConfig(ch)
 	if err != nil {
-		return nil, exists, err
+		return nil, false, err
 	}
-	contentLayer, err := cache.saveChartContentLayer(ch)
+	contentLayer, _, err := cache.saveChartContentLayer(ch)
 	if err != nil {
-		return nil, exists, err
+		return nil, false, err
 	}
-	manifest, err := cache.saveChartManifest(config, contentLayer)
+	// TODO: better check for chart existence
+	manifest, manifestExists, err := cache.saveChartManifest(config, contentLayer)
 	if err != nil {
-		return nil, exists, err
+		return nil, manifestExists, err
 	}
 	cache.ociStore.AddReference(ref, *manifest)
 	err = cache.ociStore.SaveIndex()
-	return contentLayer, exists, err
+	return contentLayer, manifestExists, err
 }
 
 func (cache *Cache) FetchChartByRef(ref string) (*chart.Chart, bool, error) {
@@ -114,9 +115,12 @@ func (cache *Cache) FetchChartByRef(ref string) (*chart.Chart, bool, error) {
 }
 
 func (cache *Cache) RemoveChartByRef(ref string) (bool, error) {
-	var exists bool
+	_, exists, err := cache.FetchChartByRef(ref)
+	if err != nil || !exists {
+		return exists, err
+	}
 	cache.ociStore.DeleteReference(ref)
-	err := cache.ociStore.SaveIndex()
+	err = cache.ociStore.SaveIndex()
 	return exists, err
 }
 
@@ -181,41 +185,41 @@ func (cache *Cache) descriptorToChart(desc *ocispec.Descriptor) (*chart.Chart, e
 }
 
 // saveChartConfig stores the Chart.yaml as json blob and return descriptor
-func (cache *Cache) saveChartConfig(ch *chart.Chart) (*ocispec.Descriptor, error) {
+func (cache *Cache) saveChartConfig(ch *chart.Chart) (*ocispec.Descriptor, bool, error) {
 	configBytes, err := json.Marshal(ch.Metadata)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	err = cache.storeBlob(configBytes)
+	configExists, err := cache.storeBlob(configBytes)
 	if err != nil {
-		return nil, err
+		return nil, configExists, err
 	}
 	descriptor := cache.memoryStore.Add("", HelmChartConfigMediaType, configBytes)
-	return &descriptor, nil
+	return &descriptor, configExists, nil
 }
 
 // saveChartContentLayer stores the chart as tarball blob and return descriptor
-func (cache *Cache) saveChartContentLayer(ch *chart.Chart) (*ocispec.Descriptor, error) {
+func (cache *Cache) saveChartContentLayer(ch *chart.Chart) (*ocispec.Descriptor, bool, error) {
 	destDir := mkdir(filepath.Join(cache.rootDir, chartArchiveTempDir))
 	tmpFile, err := chartutil.Save(ch, destDir)
 	defer os.Remove(tmpFile)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to save")
+		return nil, false, errors.Wrap(err, "failed to save")
 	}
 	contentBytes, err := ioutil.ReadFile(tmpFile)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	err = cache.storeBlob(contentBytes)
+	contentExists, err := cache.storeBlob(contentBytes)
 	if err != nil {
-		return nil, err
+		return nil, contentExists, err
 	}
 	descriptor := cache.memoryStore.Add("", HelmChartContentLayerMediaType, contentBytes)
-	return &descriptor, nil
+	return &descriptor, contentExists, nil
 }
 
 // saveChartManifest stores the chart manifest as json blob and return descriptor
-func (cache *Cache) saveChartManifest(config *ocispec.Descriptor, contentLayer *ocispec.Descriptor) (*ocispec.Descriptor, error) {
+func (cache *Cache) saveChartManifest(config *ocispec.Descriptor, contentLayer *ocispec.Descriptor) (*ocispec.Descriptor, bool, error) {
 	manifest := ocispec.Manifest{
 		Versioned: specs.Versioned{SchemaVersion: ociManifestSchemaVersion},
 		Config:    *config,
@@ -223,37 +227,41 @@ func (cache *Cache) saveChartManifest(config *ocispec.Descriptor, contentLayer *
 	}
 	manifestBytes, err := json.Marshal(manifest)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	err = cache.storeBlob(manifestBytes)
+	manifestExists, err := cache.storeBlob(manifestBytes)
 	if err != nil {
-		return nil, err
+		return nil, manifestExists, err
 	}
 	descriptor := ocispec.Descriptor{
 		MediaType: ocispec.MediaTypeImageManifest,
 		Digest:    digest.FromBytes(manifestBytes),
 		Size:      int64(len(manifestBytes)),
 	}
-	return &descriptor, nil
+	return &descriptor, manifestExists, nil
 }
 
 // storeBlob stores a blob on filesystem
-func (cache *Cache) storeBlob(blobBytes []byte) error {
+func (cache *Cache) storeBlob(blobBytes []byte) (bool, error) {
+	var exists bool
 	writer, err := cache.ociStore.Store.Writer(ctx(cache.out, cache.debug),
 		content.WithRef(digest.FromBytes(blobBytes).Hex()))
 	if err != nil {
-		return err
+		return exists, err
 	}
 	_, err = writer.Write(blobBytes)
 	if err != nil {
-		return err
+		return exists, err
 	}
 	err = writer.Commit(ctx(cache.out, cache.debug), 0, writer.Digest())
 	if err != nil {
-		return err
+		if !errdefs.IsAlreadyExists(err) {
+			return exists, err
+		}
+		exists = true
 	}
 	err = writer.Close()
-	return err
+	return exists, err
 }
 
 // fetchBlob retrieves a blob from filesystem

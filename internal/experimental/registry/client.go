@@ -18,6 +18,7 @@ package registry // import "helm.sh/helm/internal/experimental/registry"
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -139,13 +140,23 @@ func (c *Client) PullChart(ref *Reference) error {
 
 // SaveChart stores a copy of chart in local cache
 func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
-	content, _, err := c.cache.StoreChartAtRef(ch, ref.FullName())
-	fmt.Fprintf(c.out, "ref:     %s\n", ref.FullName())
-	fmt.Fprintf(c.out, "digest:  %s\n", content.Digest.Hex())
-	fmt.Fprintf(c.out, "size:    %s\n", byteCountBinary(content.Size))
-	fmt.Fprintf(c.out, "name:    %s\n", ch.Metadata.Name)
-	fmt.Fprintf(c.out, "version: %s\n", ch.Metadata.Version)
-	return err
+	content, exists, err := c.cache.StoreChartAtRef(ch, ref.FullName())
+	if err != nil {
+		return err
+	}
+	var status string
+	if !exists {
+		status = "created"
+	} else {
+		status = "linked"
+	}
+	fmt.Fprintf(c.out, "REF:      %s\n", ref.FullName())
+	fmt.Fprintf(c.out, "DIGEST:   %s\n", content.Digest.Hex())
+	fmt.Fprintf(c.out, "SIZE:     %s\n", byteCountBinary(content.Size))
+	fmt.Fprintf(c.out, "STATUS:   %s\n", status)
+	fmt.Fprintf(c.out, "NAME:     %s\n", ch.Metadata.Name)
+	fmt.Fprintf(c.out, "VERSION:  %s\n", ch.Metadata.Version)
+	return nil
 }
 
 // LoadChart retrieves a chart object by reference
@@ -159,7 +170,11 @@ func (c *Client) LoadChart(ref *Reference) (*chart.Chart, error) {
 
 // RemoveChart deletes a locally saved chart
 func (c *Client) RemoveChart(ref *Reference) error {
-	_, err := c.cache.RemoveChartByRef(ref.FullName())
+	exists, err := c.cache.RemoveChartByRef(ref.FullName())
+	if !exists {
+		return errors.New(fmt.Sprintf("No such chart: %s", ref.FullName()))
+	}
+	fmt.Fprintf(c.out, "%s: removed\n", ref.Tag)
 	return err
 }
 
