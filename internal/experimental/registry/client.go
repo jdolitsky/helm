@@ -18,15 +18,23 @@ package registry // import "helm.sh/helm/internal/experimental/registry"
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
+	"os"
+	"path/filepath"
 
+	"github.com/containerd/containerd/content"
 	orascontext "github.com/deislabs/oras/pkg/context"
-	"github.com/deislabs/oras/pkg/oras"
-	"github.com/gosuri/uitable"
+	"github.com/opencontainers/go-digest"
+	"github.com/opencontainers/image-spec/specs-go"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
 	"helm.sh/helm/pkg/chart"
+	"helm.sh/helm/pkg/chartutil"
 )
 
 const (
@@ -40,7 +48,7 @@ type (
 		Out        io.Writer
 		Authorizer Authorizer
 		Resolver   Resolver
-		Store      Store
+		Cache      Cache
 	}
 
 	// Client works with OCI-compliant registries and local Helm chart cache
@@ -49,7 +57,7 @@ type (
 		out        io.Writer
 		authorizer Authorizer
 		resolver   Resolver
-		store      Store
+		cache      Cache
 	}
 )
 
@@ -60,7 +68,7 @@ func NewClient(options *ClientOptions) *Client {
 		out:        options.Out,
 		resolver:   options.Resolver,
 		authorizer: options.Authorizer,
-		store:      options.Store,
+		cache:      options.Cache,
 	}
 }
 
@@ -86,107 +94,136 @@ func (c *Client) Logout(hostname string) error {
 
 // PushChart uploads a chart to a registry
 func (c *Client) PushChart(ref *Reference) error {
-	fmt.Fprintf(c.out, "The push refers to repository [%s]\n", ref.Repo)
-	layers, err := c.store.LoadReference(ref)
-	if err != nil {
-		return err
-	}
-	_, err = oras.Push(c.newContext(), c.resolver, ref.String(), c.store, layers,
-		oras.WithConfigMediaType(HelmChartConfigMediaType))
-	if err != nil {
-		return err
-	}
-	var totalSize int64
-	for _, layer := range layers {
-		totalSize += layer.Size
-	}
-	s := ""
-	numLayers := len(layers)
-	if 1 < numLayers {
-		s = "s"
-	}
-	fmt.Fprintf(c.out,
-		"%s: pushed to remote (%d layer%s, %s total)\n", ref.Tag, numLayers, s, byteCountBinary(totalSize))
 	return nil
 }
 
 // PullChart downloads a chart from a registry
 func (c *Client) PullChart(ref *Reference) error {
-	fmt.Fprintf(c.out, "%s: Pulling from %s\n", ref.Tag, ref.Repo)
-	config, layers, err := oras.Pull(c.newContext(), c.resolver, ref.String(), c.store, oras.WithAllowedMediaTypes(KnownMediaTypes()))
-	if err != nil {
-		return err
-	}
-	exists, err := c.store.StoreReference(ref, config, layers)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		fmt.Fprintf(c.out, "Status: Downloaded newer chart for %s\n", ref.FullName())
-	} else {
-		fmt.Fprintf(c.out, "Status: Chart is up to date for %s\n", ref.FullName())
-	}
 	return nil
 }
 
 // SaveChart stores a copy of chart in local cache
 func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
-	config, layers, err := c.store.ChartToLayers(ch)
-	if err != nil {
-		return err
-	}
-	c.store.AddReference(ref.FullName(), layers[0])
+	config, err := c.saveChartConfig(ch)
 	if err != nil {
 		return err
 	}
 
-	raw, _, err := c.store.AddManifest(config, layers, ref.FullName())
+	contentLayer, err := c.saveChartContentLayer(ch)
 	if err != nil {
 		return err
 	}
 
-	_, err = c.store.StoreBlob(raw)
+	manifest, err := c.saveChartManifest(config, contentLayer)
 	if err != nil {
 		return err
 	}
 
-	return nil
+	c.cache.ociStore.AddReference(ref.String(), *manifest)
+	err = c.cache.ociStore.SaveIndex()
+	return err
 }
 
 // LoadChart retrieves a chart object by reference
 func (c *Client) LoadChart(ref *Reference) (*chart.Chart, error) {
-	layers, err := c.store.LoadReference(ref)
-	if err != nil {
-		return nil, err
-	}
-	ch, err := c.store.LayersToChart(layers)
-	return ch, err
+	return nil, nil
 }
 
 // RemoveChart deletes a locally saved chart
 func (c *Client) RemoveChart(ref *Reference) error {
-	err := c.store.DeleteReference(ref)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(c.out, "%s: removed\n", ref.Tag)
+	c.cache.ociStore.DeleteReference(ref.String())
+	err := c.cache.ociStore.SaveIndex()
 	return err
 }
 
 // PrintChartTable prints a list of locally stored charts
 func (c *Client) PrintChartTable() error {
-	table := uitable.New()
-	table.MaxColWidth = 60
-	table.AddRow("REF", "NAME", "VERSION", "DIGEST", "SIZE", "CREATED")
-	rows, err := c.store.TableRows()
+	return nil
+}
+
+// store the Chart.yaml as json blob and return descriptor
+func (c *Client) saveChartConfig(ch *chart.Chart) (*ocispec.Descriptor, error) {
+	configBytes, err := json.Marshal(ch.Metadata)
+	if err != nil {
+		return nil, err
+	}
+
+	err = c.storeBlob(configBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	desc := c.cache.memoryStore.Add("", HelmChartConfigMediaType, configBytes)
+	return &desc, nil
+}
+
+// store the chart as tarball blob and return descriptor
+func (c *Client) saveChartContentLayer(ch *chart.Chart) (*ocispec.Descriptor, error) {
+	destDir := mkdir(filepath.Join(c.cache.rootDir, ".build"))
+	tmpFile, err := chartutil.Save(ch, destDir)
+	defer os.Remove(tmpFile)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to save")
+	}
+	contentBytes, err := ioutil.ReadFile(tmpFile)
+	if err != nil {
+		return nil, err
+	}
+
+	err = c.storeBlob(contentBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	desc := c.cache.memoryStore.Add("", HelmChartContentLayerMediaType, contentBytes)
+	return &desc, nil
+}
+
+// store the chart manifest as json blob and return descriptor
+func (c *Client) saveChartManifest(config *ocispec.Descriptor, contentLayer *ocispec.Descriptor) (*ocispec.Descriptor, error) {
+	manifest := ocispec.Manifest{
+		Versioned: specs.Versioned{
+			SchemaVersion: 2,
+		},
+		Config: *config,
+		Layers: []ocispec.Descriptor{*contentLayer},
+	}
+
+	manifestBytes, err := json.Marshal(manifest)
+	if err != nil {
+		return nil, err
+	}
+
+	err = c.storeBlob(manifestBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	desc := ocispec.Descriptor{
+		MediaType: ocispec.MediaTypeImageManifest,
+		Digest:    digest.FromBytes(manifestBytes),
+		Size:      int64(len(manifestBytes)),
+	}
+	return &desc, nil
+}
+
+// store a blob on filesystem
+func (c *Client) storeBlob(blobBytes []byte) error {
+	writer, err := c.cache.ociStore.Store.Writer(c.newContext(),
+		content.WithRef(digest.FromBytes(blobBytes).Hex()))
 	if err != nil {
 		return err
 	}
-	for _, row := range rows {
-		table.AddRow(row...)
+	_, err = writer.Write(blobBytes)
+	if err != nil {
+		return err
 	}
-	fmt.Fprintln(c.out, table.String())
-	return nil
+	err = writer.Commit(c.newContext(), 0, writer.Digest())
+	if err != nil {
+		return err
+	}
+	err = writer.Close()
+	return err
 }
 
 // disable verbose logging coming from ORAS unless debug is enabled
@@ -197,4 +234,10 @@ func (c *Client) newContext() context.Context {
 	ctx := orascontext.WithLoggerFromWriter(context.Background(), c.out)
 	orascontext.GetLogger(ctx).Logger.SetLevel(logrus.DebugLevel)
 	return ctx
+}
+
+// mkdir will create a directory (no error check) and return the path
+func mkdir(dir string) string {
+	os.MkdirAll(dir, 0755)
+	return dir
 }

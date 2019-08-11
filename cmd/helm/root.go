@@ -22,7 +22,6 @@ import (
 	"path/filepath"
 
 	auth "github.com/deislabs/oras/pkg/auth/docker"
-	orascontent "github.com/deislabs/oras/pkg/content"
 	"github.com/spf13/cobra"
 
 	"helm.sh/helm/cmd/helm/require"
@@ -145,7 +144,7 @@ func newRootCmd(actionConfig *action.Configuration, out io.Writer, args []string
 	if err != nil {
 		panic(err)
 	}
-	store, err := orascontent.NewOCIStore(filepath.Join(helmpath.Registry(), "cache"))
+	cache, err := registry.NewCache(filepath.Join(helmpath.Registry(), "cache"))
 	if err != nil {
 		panic(err)
 	}
@@ -158,9 +157,7 @@ func newRootCmd(actionConfig *action.Configuration, out io.Writer, args []string
 		Resolver: registry.Resolver{
 			Resolver: resolver,
 		},
-		Store: registry.Store{
-			Store: store,
-		},
+		Cache: *cache,
 	})
 
 	cmd.AddCommand(
