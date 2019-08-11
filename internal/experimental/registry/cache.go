@@ -96,33 +96,16 @@ func (cache *Cache) StoreChartAtRef(ch *chart.Chart, ref string) (*ocispec.Descr
 }
 
 func (cache *Cache) FetchChartByRef(ref string) (*chart.Chart, bool, error) {
-	var ch chart.Chart
-	var exists bool
-	for _, manifest := range cache.ociStore.ListReferences() {
-		if manifest.Annotations[ocispec.AnnotationRefName] == ref {
-			c, err := cache.descriptorToChart(&manifest)
+	for _, m := range cache.ociStore.ListReferences() {
+		if m.Annotations[ocispec.AnnotationRefName] == ref {
+			c, err := cache.manifestDescriptorToChart(&m)
 			if err != nil {
-				return nil, exists, err
+				return nil, false, err
 			}
-			ch = *c
-			exists = true
-			break
+			return c, true, nil
 		}
 	}
-	return &ch, exists, nil
-}
-
-func (cache *Cache) FetchDescriptorByRef(ref string) (*ocispec.Descriptor, bool) {
-	var desc ocispec.Descriptor
-	var exists bool
-	for _, manifest := range cache.ociStore.ListReferences() {
-		if manifest.Annotations[ocispec.AnnotationRefName] == ref {
-			desc = manifest
-			exists = true
-			break
-		}
-	}
-	return &desc, exists
+	return nil, false, nil
 }
 
 func (cache *Cache) RemoveChartByRef(ref string) (bool, error) {
@@ -142,7 +125,7 @@ func (cache *Cache) ListAllCharts() ([]*chart.Chart, error) {
 		if ref != "" {
 			continue
 		}
-		ch, err := cache.descriptorToChart(&manifest)
+		ch, err := cache.manifestDescriptorToChart(&manifest)
 		if err != nil {
 			return nil, err
 		}
@@ -161,8 +144,19 @@ func (cache *Cache) ListAllCharts() ([]*chart.Chart, error) {
 	return allCharts, nil
 }
 
-// descriptorToChart converts a descriptor to Chart
-func (cache *Cache) descriptorToChart(desc *ocispec.Descriptor) (*chart.Chart, error) {
+func (cache *Cache) LoadChartDescriptorsByRef(ref string) (*ocispec.Descriptor, []ocispec.Descriptor, bool, error) {
+	for _, m := range cache.ociStore.ListReferences() {
+		if m.Annotations[ocispec.AnnotationRefName] == ref {
+			//config := cache.memoryStore.Add("", HelmChartConfigMediaType, []byte("hi"))
+			//contentLayer := cache.memoryStore.Add("", HelmChartContentLayerMediaType, []byte("hi"))
+			//return &config, []ocispec.Descriptor{contentLayer}, true, nil
+		}
+	}
+	return nil, nil, false, nil
+}
+
+// manifestDescriptorToChart converts a descriptor to Chart
+func (cache *Cache) manifestDescriptorToChart(desc *ocispec.Descriptor) (*chart.Chart, error) {
 	manifestBytes, err := cache.fetchBlob(desc)
 	if err != nil {
 		return nil, err
