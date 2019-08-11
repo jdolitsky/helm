@@ -147,7 +147,17 @@ func (c *Client) PushChart(ref *Reference) error {
 
 // PullChart downloads a chart from a registry
 func (c *Client) PullChart(ref *Reference) error {
-	return nil
+	fmt.Fprintf(c.out, "%s: Pulling from %s\n", ref.Tag, ref.Repo)
+	manifest, _, err := oras.Pull(ctx(c.out, c.debug), c.resolver, ref.FullName(), c.cache.ociStore,
+		oras.WithPullEmptyNameAllowed(),
+		oras.WithAllowedMediaTypes(KnownMediaTypes()),
+		oras.WithContentProvideIngester(c.cache.ociStore))
+	if err != nil {
+		return err
+	}
+	c.cache.ociStore.AddReference(ref.FullName(), manifest)
+	err = c.cache.ociStore.SaveIndex()
+	return err
 }
 
 // SaveChart stores a copy of chart in local cache

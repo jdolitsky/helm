@@ -27,6 +27,7 @@ const (
 // KnownMediaTypes returns a list of layer mediaTypes that the Helm client knows about
 func KnownMediaTypes() []string {
 	return []string{
+		HelmChartConfigMediaType,
 		HelmChartContentLayerMediaType,
 	}
 }
