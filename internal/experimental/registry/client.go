@@ -214,7 +214,8 @@ func (c *Client) getChartTableRows() [][]interface{} {
 		ch, err := c.cache.manifestDescriptorToChart(&manifest)
 		if err != nil {
 			if c.debug {
-				fmt.Fprintf(c.out, fmt.Sprintf("warning: could not parse chart for %s: %s\n", ref, err.Error()))
+				fmt.Fprintf(c.out, fmt.Sprintf("warning: could not fetch chart content for %s: %s\n",
+					ref, err.Error()))
 			}
 			continue
 		}

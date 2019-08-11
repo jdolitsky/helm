@@ -100,11 +100,15 @@ func (cache *Cache) storeChartAtRef(ch *chart.Chart, ref string) (*ocispec.Descr
 func (cache *Cache) fetchChartByRef(ref string) (*chart.Chart, bool, error) {
 	for _, m := range cache.ociStore.ListReferences() {
 		if m.Annotations[ocispec.AnnotationRefName] == ref {
-			c, err := cache.manifestDescriptorToChart(&m)
+			cb, err := cache.manifestDescriptorToChartContentBytes(&m)
 			if err != nil {
 				return nil, false, err
 			}
-			return c, true, nil
+			ch, err := loader.LoadArchive(bytes.NewBuffer(cb))
+			if err != nil {
+				return nil, false, err
+			}
+			return ch, true, nil
 		}
 	}
 	return nil, false, nil
@@ -126,16 +130,34 @@ func (cache *Cache) removeChartByRef(ref string) (bool, error) {
 func (cache *Cache) loadChartDescriptorsByRef(ref string) (*ocispec.Descriptor, []ocispec.Descriptor, bool, error) {
 	for _, m := range cache.ociStore.ListReferences() {
 		if m.Annotations[ocispec.AnnotationRefName] == ref {
-			//config := cache.memoryStore.Add("", HelmChartConfigMediaType, []byte("hi"))
-			//contentLayer := cache.memoryStore.Add("", HelmChartContentLayerMediaType, []byte("hi"))
-			//return &config, []ocispec.Descriptor{contentLayer}, true, nil
+			contentBytes, err := cache.manifestDescriptorToChartContentBytes(&m)
+			contentLayer := cache.memoryStore.Add("", HelmChartContentLayerMediaType, contentBytes)
+			ch, err := loader.LoadArchive(bytes.NewBuffer(contentBytes))
+			if err != nil {
+				return nil, nil, false, err
+			}
+			configBytes, err := json.Marshal(ch.Metadata)
+			if err != nil {
+				return nil, nil, false, err
+			}
+			config := cache.memoryStore.Add("", HelmChartConfigMediaType, configBytes)
+			return &config, []ocispec.Descriptor{contentLayer}, true, nil
 		}
 	}
 	return nil, nil, false, nil
 }
 
-// manifestDescriptorToChart converts a descriptor to Chart
+// manifestDescriptorToChart converts a manifest to a chart
 func (cache *Cache) manifestDescriptorToChart(desc *ocispec.Descriptor) (*chart.Chart, error) {
+	contentBytes, err := cache.manifestDescriptorToChartContentBytes(desc)
+	if err != nil {
+		return nil, err
+	}
+	return loader.LoadArchive(bytes.NewBuffer(contentBytes))
+}
+
+// manifestDescriptorToChartContentBytes converts a manifest to the content bytes of a chart
+func (cache *Cache) manifestDescriptorToChartContentBytes(desc *ocispec.Descriptor) ([]byte, error) {
 	manifestBytes, err := cache.fetchBlob(desc)
 	if err != nil {
 		return nil, err
@@ -161,11 +183,7 @@ func (cache *Cache) manifestDescriptorToChart(desc *ocispec.Descriptor) (*chart.
 		return nil, errors.New(
 			fmt.Sprintf("manifest does not contain a layer with mediatype %s", HelmChartContentLayerMediaType))
 	}
-	contentBytes, err := cache.fetchBlob(contentLayer)
-	if err != nil {
-		return nil, err
-	}
-	return loader.LoadArchive(bytes.NewBuffer(contentBytes))
+	return cache.fetchBlob(contentLayer)
 }
 
 // saveChartConfig stores the Chart.yaml as json blob and return descriptor
