@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"helm.sh/helm/pkg/chart/loader"
 	"io"
 	"io/ioutil"
 	"os"
@@ -36,13 +35,12 @@ import (
 	"github.com/pkg/errors"
 
 	"helm.sh/helm/pkg/chart"
+	"helm.sh/helm/pkg/chart/loader"
 	"helm.sh/helm/pkg/chartutil"
 )
 
 const (
 	CacheRootDir = "cache"
-
-	chartArchiveTempDir = ".build"
 )
 
 type (
@@ -200,7 +198,7 @@ func (cache *Cache) saveChartConfig(ch *chart.Chart) (*ocispec.Descriptor, bool,
 
 // saveChartContentLayer stores the chart as tarball blob and return descriptor
 func (cache *Cache) saveChartContentLayer(ch *chart.Chart) (*ocispec.Descriptor, bool, error) {
-	destDir := mkdir(filepath.Join(cache.rootDir, chartArchiveTempDir))
+	destDir := mkdir(filepath.Join(cache.rootDir, ".build"))
 	tmpFile, err := chartutil.Save(ch, destDir)
 	defer os.Remove(tmpFile)
 	if err != nil {
@@ -221,7 +219,7 @@ func (cache *Cache) saveChartContentLayer(ch *chart.Chart) (*ocispec.Descriptor,
 // saveChartManifest stores the chart manifest as json blob and return descriptor
 func (cache *Cache) saveChartManifest(config *ocispec.Descriptor, contentLayer *ocispec.Descriptor) (*ocispec.Descriptor, bool, error) {
 	manifest := ocispec.Manifest{
-		Versioned: specs.Versioned{SchemaVersion: ociManifestSchemaVersion},
+		Versioned: specs.Versioned{SchemaVersion: 2},
 		Config:    *config,
 		Layers:    []ocispec.Descriptor{*contentLayer},
 	}

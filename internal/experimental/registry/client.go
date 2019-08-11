@@ -22,9 +22,13 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"sort"
+	"time"
 
 	auth "github.com/deislabs/oras/pkg/auth/docker"
+	"github.com/docker/go-units"
 	"github.com/gosuri/uitable"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 
 	"helm.sh/helm/pkg/chart"
 	"helm.sh/helm/pkg/helmpath"
@@ -32,8 +36,6 @@ import (
 
 const (
 	CredentialsFileBasename = "config.json"
-
-	ociManifestSchemaVersion = 2
 )
 
 type (
@@ -183,6 +185,49 @@ func (c *Client) PrintChartTable() error {
 	table := uitable.New()
 	table.MaxColWidth = 60
 	table.AddRow("REF", "NAME", "VERSION", "DIGEST", "SIZE", "CREATED")
+	rows := c.getChartTableRows()
+	for _, row := range rows {
+		table.AddRow(row...)
+	}
 	fmt.Fprintln(c.out, table.String())
 	return nil
+}
+
+// getChartTableRows returns rows in uitable-friendly format
+func (c *Client) getChartTableRows() [][]interface{} {
+	refsMap := map[string]map[string]string{}
+	for _, manifest := range c.cache.ociStore.ListReferences() {
+		ref := manifest.Annotations[ocispec.AnnotationRefName]
+		if ref == "" {
+			continue
+		}
+		ch, err := c.cache.descriptorToChart(&manifest)
+		if err != nil && c.debug {
+			fmt.Fprintf(c.out, fmt.Sprintf("warning: could not parse chart: %s", err.Error()))
+		}
+		if _, ok := refsMap[ref]; !ok {
+			refsMap[ref] = map[string]string{}
+		}
+		refsMap[ref]["name"] = ch.Metadata.Name
+		refsMap[ref]["version"] = ch.Metadata.Version
+		refsMap[ref]["digest"] = shortDigest(manifest.Digest.Hex())
+		refsMap[ref]["size"] = byteCountBinary(manifest.Size)
+		refsMap[ref]["created"] = units.HumanDuration(time.Now().UTC().Sub(time.Now()))
+	}
+	// Sort and convert to format expected by uitable
+	rows := make([][]interface{}, len(refsMap))
+	keys := make([]string, 0, len(refsMap))
+	for key := range refsMap {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for i, key := range keys {
+		rows[i] = make([]interface{}, 6)
+		rows[i][0] = key
+		ref := refsMap[key]
+		for j, k := range []string{"name", "version", "digest", "size", "created"} {
+			rows[i][j+1] = ref[k]
+		}
+	}
+	return rows
 }

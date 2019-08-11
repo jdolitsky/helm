@@ -51,6 +51,14 @@ func ctx(out io.Writer, debug bool) context.Context {
 	return ctx
 }
 
+// shortDigest returns first 7 characters of a sha256 digest
+func shortDigest(digest string) string {
+	if len(digest) == 64 {
+		return digest[:7]
+	}
+	return digest
+}
+
 // mkdir will create a directory (no error check) and return the path
 func mkdir(dir string) string {
 	os.MkdirAll(dir, 0755)
