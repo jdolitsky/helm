@@ -119,7 +119,7 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 		return err
 	}
 
-	c.cache.ociStore.AddReference(ref.String(), *manifest)
+	c.cache.ociStore.AddReference(ref.FullName(), *manifest)
 	err = c.cache.ociStore.SaveIndex()
 	return err
 }
@@ -131,7 +131,7 @@ func (c *Client) LoadChart(ref *Reference) (*chart.Chart, error) {
 
 // RemoveChart deletes a locally saved chart
 func (c *Client) RemoveChart(ref *Reference) error {
-	c.cache.ociStore.DeleteReference(ref.String())
+	c.cache.ociStore.DeleteReference(ref.FullName())
 	err := c.cache.ociStore.SaveIndex()
 	return err
 }
