@@ -133,7 +133,7 @@ func (c *Client) Logout(hostname string) error {
 
 // PushChart uploads a chart to a registry
 func (c *Client) PushChart(ref *Reference) error {
-	config, layers, exists, err := c.cache.LoadChartDescriptorsByRef(ref.FullName())
+	config, layers, exists, err := c.cache.loadChartDescriptorsByRef(ref.FullName())
 	if err != nil {
 		return err
 	}
@@ -152,7 +152,7 @@ func (c *Client) PullChart(ref *Reference) error {
 
 // SaveChart stores a copy of chart in local cache
 func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
-	content, _, err := c.cache.StoreChartAtRef(ch, ref.FullName())
+	content, _, err := c.cache.storeChartAtRef(ch, ref.FullName())
 	if err != nil {
 		return err
 	}
@@ -169,7 +169,7 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 
 // LoadChart retrieves a chart object by reference
 func (c *Client) LoadChart(ref *Reference) (*chart.Chart, error) {
-	ch, _, err := c.cache.FetchChartByRef(ref.FullName())
+	ch, _, err := c.cache.fetchChartByRef(ref.FullName())
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +178,7 @@ func (c *Client) LoadChart(ref *Reference) (*chart.Chart, error) {
 
 // RemoveChart deletes a locally saved chart
 func (c *Client) RemoveChart(ref *Reference) error {
-	exists, err := c.cache.RemoveChartByRef(ref.FullName())
+	exists, err := c.cache.removeChartByRef(ref.FullName())
 	if !exists {
 		return errors.New(fmt.Sprintf("No such chart: %s", ref.FullName()))
 	}
@@ -223,7 +223,7 @@ func (c *Client) getChartTableRows() [][]interface{} {
 		}
 		refsMap[ref]["name"] = ch.Metadata.Name
 		refsMap[ref]["version"] = ch.Metadata.Version
-		_, layers, exists, err := c.cache.LoadChartDescriptorsByRef(ref)
+		_, layers, exists, err := c.cache.loadChartDescriptorsByRef(ref)
 		if err != nil {
 			if c.debug {
 				fmt.Fprintf(c.out,

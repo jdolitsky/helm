@@ -24,7 +24,6 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"sort"
 
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/errdefs"
@@ -51,7 +50,7 @@ type (
 		RootDir string
 	}
 
-	// Cache handles local/in-memory storage of Helm charts
+	// Cache handles local/in-memory storage of Helm charts, compliant with OCI Layout
 	Cache struct {
 		debug       bool
 		out         io.Writer
@@ -61,6 +60,7 @@ type (
 	}
 )
 
+// NewCache returns a new OCI Layout-compliant cache with config
 func NewCache(options *CacheOptions) (*Cache, error) {
 	ociStore, err := orascontent.NewOCIStore(options.RootDir)
 	if err != nil {
@@ -76,7 +76,8 @@ func NewCache(options *CacheOptions) (*Cache, error) {
 	return &cache, nil
 }
 
-func (cache *Cache) StoreChartAtRef(ch *chart.Chart, ref string) (*ocispec.Descriptor, bool, error) {
+// storeChartAtRef saves a chart in cache under ref
+func (cache *Cache) storeChartAtRef(ch *chart.Chart, ref string) (*ocispec.Descriptor, bool, error) {
 	config, _, err := cache.saveChartConfig(ch)
 	if err != nil {
 		return nil, false, err
@@ -95,7 +96,8 @@ func (cache *Cache) StoreChartAtRef(ch *chart.Chart, ref string) (*ocispec.Descr
 	return contentLayer, manifestExists, err
 }
 
-func (cache *Cache) FetchChartByRef(ref string) (*chart.Chart, bool, error) {
+// fetchChartByRef returns a chart based on ref
+func (cache *Cache) fetchChartByRef(ref string) (*chart.Chart, bool, error) {
 	for _, m := range cache.ociStore.ListReferences() {
 		if m.Annotations[ocispec.AnnotationRefName] == ref {
 			c, err := cache.manifestDescriptorToChart(&m)
@@ -108,8 +110,10 @@ func (cache *Cache) FetchChartByRef(ref string) (*chart.Chart, bool, error) {
 	return nil, false, nil
 }
 
-func (cache *Cache) RemoveChartByRef(ref string) (bool, error) {
-	_, exists, err := cache.FetchChartByRef(ref)
+// removeChartByRef removes a chart from cache based on ref
+// TODO: garbage collection, only manifest removed
+func (cache *Cache) removeChartByRef(ref string) (bool, error) {
+	_, exists, err := cache.fetchChartByRef(ref)
 	if err != nil || !exists {
 		return exists, err
 	}
@@ -118,33 +122,8 @@ func (cache *Cache) RemoveChartByRef(ref string) (bool, error) {
 	return exists, err
 }
 
-func (cache *Cache) ListAllCharts() ([]*chart.Chart, error) {
-	chartMap := map[string]*chart.Chart{}
-	for _, manifest := range cache.ociStore.ListReferences() {
-		ref := manifest.Annotations[ocispec.AnnotationRefName]
-		if ref != "" {
-			continue
-		}
-		ch, err := cache.manifestDescriptorToChart(&manifest)
-		if err != nil {
-			return nil, err
-		}
-		chartMap[ref] = ch
-	}
-	// Sort by ref, alphabetically
-	refs := make([]string, 0, len(chartMap))
-	for ref := range chartMap {
-		refs = append(refs, ref)
-	}
-	sort.Strings(refs)
-	var allCharts []*chart.Chart
-	for _, ref := range refs {
-		allCharts = append(allCharts, chartMap[ref])
-	}
-	return allCharts, nil
-}
-
-func (cache *Cache) LoadChartDescriptorsByRef(ref string) (*ocispec.Descriptor, []ocispec.Descriptor, bool, error) {
+// loadChartDescriptorsByRef returns config and layers represneting a chart, and loads them into memory store
+func (cache *Cache) loadChartDescriptorsByRef(ref string) (*ocispec.Descriptor, []ocispec.Descriptor, bool, error) {
 	for _, m := range cache.ociStore.ListReferences() {
 		if m.Annotations[ocispec.AnnotationRefName] == ref {
 			//config := cache.memoryStore.Add("", HelmChartConfigMediaType, []byte("hi"))
@@ -205,7 +184,8 @@ func (cache *Cache) saveChartConfig(ch *chart.Chart) (*ocispec.Descriptor, bool,
 
 // saveChartContentLayer stores the chart as tarball blob and return descriptor
 func (cache *Cache) saveChartContentLayer(ch *chart.Chart) (*ocispec.Descriptor, bool, error) {
-	destDir := mkdir(filepath.Join(cache.rootDir, ".build"))
+	destDir := filepath.Join(cache.rootDir, ".build")
+	os.MkdirAll(destDir, 0755)
 	tmpFile, err := chartutil.Save(ch, destDir)
 	defer os.Remove(tmpFile)
 	if err != nil {

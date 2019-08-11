@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 
 	orascontext "github.com/deislabs/oras/pkg/context"
 	"github.com/sirupsen/logrus"
@@ -40,6 +39,14 @@ func byteCountBinary(b int64) string {
 	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
+// shortDigest returns first 7 characters of a sha256 digest
+func shortDigest(digest string) string {
+	if len(digest) == 64 {
+		return digest[:7]
+	}
+	return digest
+}
+
 // ctx retrieves a fresh context.
 // disable verbose logging coming from ORAS (unless debug is enabled)
 func ctx(out io.Writer, debug bool) context.Context {
@@ -49,18 +56,4 @@ func ctx(out io.Writer, debug bool) context.Context {
 	ctx := orascontext.WithLoggerFromWriter(context.Background(), out)
 	orascontext.GetLogger(ctx).Logger.SetLevel(logrus.DebugLevel)
 	return ctx
-}
-
-// shortDigest returns first 7 characters of a sha256 digest
-func shortDigest(digest string) string {
-	if len(digest) == 64 {
-		return digest[:7]
-	}
-	return digest
-}
-
-// mkdir will create a directory (no error check) and return the path
-func mkdir(dir string) string {
-	os.MkdirAll(dir, 0755)
-	return dir
 }
