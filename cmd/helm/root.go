@@ -17,17 +17,13 @@ limitations under the License.
 package main // import "helm.sh/helm/cmd/helm"
 
 import (
-	"context"
 	"io"
-	"path/filepath"
 
-	auth "github.com/deislabs/oras/pkg/auth/docker"
 	"github.com/spf13/cobra"
 
 	"helm.sh/helm/cmd/helm/require"
 	"helm.sh/helm/internal/experimental/registry"
 	"helm.sh/helm/pkg/action"
-	"helm.sh/helm/pkg/helmpath"
 )
 
 const (
@@ -132,34 +128,7 @@ func newRootCmd(actionConfig *action.Configuration, out io.Writer, args []string
 	// set defaults from environment
 	settings.Init(flags)
 
-	// Add the registry client based on settings
-	// TODO: Move this elsewhere (first, settings.Init() must move)
-	// TODO: handle errors, dont panic
-	credentialsFile := filepath.Join(helmpath.Registry(), registry.CredentialsFileBasename)
-	client, err := auth.NewClient(credentialsFile)
-	if err != nil {
-		panic(err)
-	}
-	resolver, err := client.Resolver(context.Background())
-	if err != nil {
-		panic(err)
-	}
-	cache, err := registry.NewCache(filepath.Join(helmpath.Registry(), "cache"))
-	if err != nil {
-		panic(err)
-	}
-	actionConfig.RegistryClient = registry.NewClient(&registry.ClientOptions{
-		Debug: settings.Debug,
-		Out:   out,
-		Authorizer: registry.Authorizer{
-			Client: client,
-		},
-		Resolver: registry.Resolver{
-			Resolver: resolver,
-		},
-		Cache: *cache,
-	})
-
+	// Add subcommands
 	cmd.AddCommand(
 		// chart commands
 		newCreateCmd(out),
@@ -171,10 +140,6 @@ func newRootCmd(actionConfig *action.Configuration, out io.Writer, args []string
 		newRepoCmd(out),
 		newSearchCmd(out),
 		newVerifyCmd(out),
-
-		// registry/chart cache commands
-		newRegistryCmd(actionConfig, out),
-		newChartCmd(actionConfig, out),
 
 		// release commands
 		newGetCmd(actionConfig, out),
@@ -195,6 +160,20 @@ func newRootCmd(actionConfig *action.Configuration, out io.Writer, args []string
 
 		// Hidden documentation generator command: 'helm docs'
 		newDocsCmd(out),
+	)
+
+	// Add *Experimental* subcommands
+	registryClient, err := registry.NewClientWithDefaults()
+	if err != nil {
+		// TODO: do not panic
+		panic(err)
+	}
+	registryClient.SetDebug(settings.Debug)
+	registryClient.SetWriter(out)
+	actionConfig.RegistryClient = registryClient
+	cmd.AddCommand(
+		newRegistryCmd(actionConfig, out),
+		newChartCmd(actionConfig, out),
 	)
 
 	// Find and add plugins
