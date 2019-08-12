@@ -72,8 +72,6 @@ type (
 		Digest       digest.Digest
 		CreatedAt    time.Time
 		Chart        *chart.Chart
-		ChartName    string
-		ChartVersion string
 	}
 )
 
@@ -157,8 +155,6 @@ func (cache *Cache) FetchReference(ref *Reference) (*CacheRefSummary, error) {
 				return &r, err
 			}
 			r.Chart = ch
-			r.ChartName = ch.Metadata.Name
-			r.ChartVersion = ch.Metadata.Version
 		}
 	}
 	return &r, nil
@@ -216,10 +212,6 @@ func (cache *Cache) DeleteReference(ref *Reference) (*CacheRefSummary, error) {
 	}
 	cache.ociStore.DeleteReference(r.Name)
 	err = cache.ociStore.SaveIndex()
-	if err != nil {
-		return r, err
-	}
-
 	return r, err
 }
 
