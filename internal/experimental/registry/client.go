@@ -133,37 +133,28 @@ func (c *Client) Logout(hostname string) error {
 
 // PushChart uploads a chart to a registry
 func (c *Client) PushChart(ref *Reference) error {
-	ch, exists, err := c.cache.fetchChartByRef(ref.FullName())
+	r, err := c.cache.FetchReference(ref)
 	if err != nil {
 		return err
 	}
-	if !exists {
-		return errors.New(fmt.Sprintf("Chart not found: %s", ref.FullName()))
+	if !r.Exists {
+		return errors.New(fmt.Sprintf("Chart not found: %s", r.Name))
 	}
-	config, layers, exists, err := c.cache.loadChartDescriptorsByRef(ref.FullName())
+	fmt.Fprintf(c.out, "The push refers to repository [%s]\n", r.Repo)
+	c.printCacheRefSummary(r)
+	layers := []ocispec.Descriptor{*r.ContentLayer}
+	_, err = oras.Push(ctx(c.out, c.debug), c.resolver, r.Name, c.cache.memoryStore, layers,
+		oras.WithConfig(*r.Config), oras.WithNameValidation(nil))
 	if err != nil {
 		return err
-	}
-	if !exists {
-		return errors.New(fmt.Sprintf("Chart not found: %s", ref.FullName()))
-	}
-	fmt.Fprintf(c.out, "The push refers to repository [%s]\n", ref.Repo)
-	c.printChartSummary(ref, &layers[0], ch)
-	_, err = oras.Push(ctx(c.out, c.debug), c.resolver, ref.FullName(), c.cache.memoryStore,
-		layers, oras.WithConfig(*config), oras.WithNameValidation(nil))
-	if err != nil {
-		return err
-	}
-	var totalSize int64
-	for _, layer := range layers {
-		totalSize += layer.Size
 	}
 	s := ""
-	if 1 < len(layers) {
+	numLayers := len(layers)
+	if 1 < numLayers {
 		s = "s"
 	}
 	fmt.Fprintf(c.out,
-		"%s: pushed to remote (%d layer%s, %s total)\n", ref.Tag, len(layers), s, byteCountBinary(totalSize))
+		"%s: pushed to remote (%d layer%s, %s total)\n", r.Tag, numLayers, s, byteCountBinary(r.Size))
 	return nil
 }
 
@@ -172,12 +163,12 @@ func (c *Client) PullChart(ref *Reference) error {
 	if ref.Tag == "" {
 		return errors.New("tag explicitly required")
 	}
-	_, exists, err := c.cache.fetchChartByRef(ref.FullName())
+	existing, err := c.cache.FetchReference(ref)
 	if err != nil {
 		return err
 	}
 	fmt.Fprintf(c.out, "%s: Pulling from %s\n", ref.Tag, ref.Repo)
-	manifest, layers, err := oras.Pull(ctx(c.out, c.debug), c.resolver, ref.FullName(), c.cache.ociStore,
+	manifest, _, err := oras.Pull(ctx(c.out, c.debug), c.resolver, ref.FullName(), c.cache.ociStore,
 		oras.WithPullEmptyNameAllowed(),
 		oras.WithAllowedMediaTypes(KnownMediaTypes()),
 		oras.WithContentProvideIngester(c.cache.ociStore))
@@ -189,15 +180,12 @@ func (c *Client) PullChart(ref *Reference) error {
 	if err != nil {
 		return err
 	}
-	ch, ex, err := c.cache.fetchChartByRef(ref.FullName())
-	if err != nil {
-		return err
+	r, err := c.cache.FetchReference(ref)
+	if !r.Exists {
+		return errors.New(fmt.Sprintf("Chart not found: %s", r.Name))
 	}
-	if !ex {
-		return errors.New(fmt.Sprintf("Chart not found: %s", ref.FullName()))
-	}
-	c.printChartSummary(ref, &layers[0], ch)
-	if !exists {
+	c.printCacheRefSummary(r)
+	if !existing.Exists {
 		fmt.Fprintf(c.out, "Status: Downloaded newer chart for %s\n", ref.FullName())
 	} else {
 		fmt.Fprintf(c.out, "Status: Chart is up to date for %s\n", ref.FullName())
@@ -207,45 +195,38 @@ func (c *Client) PullChart(ref *Reference) error {
 
 // SaveChart stores a copy of chart in local cache
 func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
-	content, _, err := c.cache.storeChartAtRef(ch, ref.FullName())
+	r, err := c.cache.StoreReference(ref, ch)
 	if err != nil {
 		return err
 	}
-	c.printChartSummary(ref, content, ch)
+	c.printCacheRefSummary(r)
 	fmt.Fprintf(c.out, "%s: saved\n", ref.Tag)
 	return nil
 }
 
 // LoadChart retrieves a chart object by reference
 func (c *Client) LoadChart(ref *Reference) (*chart.Chart, error) {
-	ch, exists, err := c.cache.fetchChartByRef(ref.FullName())
+	r, err := c.cache.FetchReference(ref)
 	if err != nil {
 		return nil, err
 	}
-	if !exists {
+	if !r.Exists {
 		return nil, errors.New(fmt.Sprintf("Chart not found: %s", ref.FullName()))
 	}
-	_, layers, exists, err := c.cache.loadChartDescriptorsByRef(ref.FullName())
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, errors.New(fmt.Sprintf("Chart not found: %s", ref.FullName()))
-	}
-	c.printChartSummary(ref, &layers[0], ch)
-	return ch, nil
+	c.printCacheRefSummary(r)
+	return r.Chart, nil
 }
 
 // RemoveChart deletes a locally saved chart
 func (c *Client) RemoveChart(ref *Reference) error {
-	exists, err := c.cache.removeChartByRef(ref.FullName())
+	r, err := c.cache.DeleteReference(ref)
 	if err != nil {
 		return err
 	}
-	if !exists {
+	if !r.Exists {
 		return errors.New(fmt.Sprintf("Chart not found: %s", ref.FullName()))
 	}
-	fmt.Fprintf(c.out, "%s: removed\n", ref.Tag)
+	fmt.Fprintf(c.out, "%s: removed\n", r.Tag)
 	return nil
 }
 
@@ -254,7 +235,10 @@ func (c *Client) PrintChartTable() error {
 	table := uitable.New()
 	table.MaxColWidth = 60
 	table.AddRow("REF", "NAME", "VERSION", "DIGEST", "SIZE", "CREATED")
-	rows := c.getChartTableRows()
+	rows, err := c.getChartTableRows()
+	if err != nil {
+		return err
+	}
 	for _, row := range rows {
 		table.AddRow(row...)
 	}
@@ -262,80 +246,29 @@ func (c *Client) PrintChartTable() error {
 	return nil
 }
 
-func (c *Client) printChartSummary(ref *Reference, content *ocispec.Descriptor, ch *chart.Chart) {
-	fmt.Fprintf(c.out, "ref:     %s\n", ref.FullName())
-	fmt.Fprintf(c.out, "digest:  %s\n", content.Digest.Hex())
-	fmt.Fprintf(c.out, "size:    %s\n", byteCountBinary(content.Size))
-	fmt.Fprintf(c.out, "name:    %s\n", ch.Metadata.Name)
-	fmt.Fprintf(c.out, "version: %s\n", ch.Metadata.Version)
+// printCacheRefSummary prints out chart ref summary
+func (c *Client) printCacheRefSummary(r *CacheRefSummary) {
+	fmt.Fprintf(c.out, "ref:     %s\n", r.Name)
+	fmt.Fprintf(c.out, "digest:  %s\n", r.Digest.Hex())
+	fmt.Fprintf(c.out, "size:    %s\n", byteCountBinary(r.Size))
+	fmt.Fprintf(c.out, "name:    %s\n", r.Chart.Metadata.Name)
+	fmt.Fprintf(c.out, "version: %s\n", r.Chart.Metadata.Version)
 }
 
 // getChartTableRows returns rows in uitable-friendly format
-// TODO: clean clean tidy tidy
-func (c *Client) getChartTableRows() [][]interface{} {
-	refsMap := map[string]map[string]string{}
-	for _, manifest := range c.cache.ociStore.ListReferences() {
-		ref := manifest.Annotations[ocispec.AnnotationRefName]
-		if ref == "" {
-			if c.debug {
-				fmt.Fprintf(c.out, fmt.Sprintf("warning: found manifest with no name: %s\n", manifest.Digest))
-			}
-			continue
-		}
-		ch, err := c.cache.manifestDescriptorToChart(&manifest)
-		if err != nil {
-			if c.debug {
-				fmt.Fprintf(c.out, fmt.Sprintf("warning: could not fetch chart content for %s: %s\n",
-					ref, err.Error()))
-			}
-			continue
-		}
-		if _, ok := refsMap[ref]; !ok {
-			refsMap[ref] = map[string]string{}
-		}
-		refsMap[ref]["name"] = ch.Metadata.Name
-		refsMap[ref]["version"] = ch.Metadata.Version
-		_, layers, exists, err := c.cache.loadChartDescriptorsByRef(ref)
-		if err != nil {
-			if c.debug {
-				fmt.Fprintf(c.out,
-					fmt.Sprintf("warning: error loading chart descriptors for %s: %s\n", ref, err.Error()))
-			}
-			continue
-		}
-		if !exists {
-			if c.debug {
-				fmt.Fprintf(c.out,
-					fmt.Sprintf("warning: chart descriptors could not be located for %s\n", ref))
-			}
-			continue
-		}
-		content := layers[0]
-		info, err := c.cache.ociStore.Info(ctx(c.out, c.debug), content.Digest)
-		if err != nil {
-			if c.debug {
-				fmt.Fprintf(c.out,
-					fmt.Sprintf("warning: error describing blob %s for %s: %s\n",
-						content.Digest.Hex(), ref, err.Error()))
-			}
-			continue
-		}
-		refsMap[ref]["digest"] = shortDigest(info.Digest.Hex())
-		refsMap[ref]["size"] = byteCountBinary(info.Size)
-		refsMap[ref]["created"] = units.HumanDuration(time.Now().UTC().Sub(info.CreatedAt))
+func (c *Client) getChartTableRows() ([][]interface{}, error) {
+	rr, err := c.cache.ListReferences()
+	if err != nil {
+		return nil, err
 	}
-	// Filter out any refs that are incomplete (do not have all required fields)
-	tableHeaders := []string{"name", "version", "digest", "size", "created"}
-	for k, ref := range refsMap {
-		allKeysFound := true
-		for _, v := range tableHeaders {
-			if _, ok := ref[v]; !ok {
-				allKeysFound = false
-				break
-			}
-		}
-		if !allKeysFound {
-			delete(refsMap, k)
+	refsMap := map[string]map[string]string{}
+	for _, r := range rr {
+		refsMap[r.Name] = map[string]string{
+			"name":    r.Chart.Metadata.Name,
+			"version": r.Chart.Metadata.Version,
+			"digest":  shortDigest(r.Digest.Hex()),
+			"size":    byteCountBinary(r.Size),
+			"created": units.HumanDuration(time.Now().UTC().Sub(r.CreatedAt)),
 		}
 	}
 	// Sort and convert to format expected by uitable
@@ -349,9 +282,9 @@ func (c *Client) getChartTableRows() [][]interface{} {
 		rows[i] = make([]interface{}, 6)
 		rows[i][0] = key
 		ref := refsMap[key]
-		for j, k := range tableHeaders {
+		for j, k := range []string{"name", "version", "digest", "size", "created"} {
 			rows[i][j+1] = ref[k]
 		}
 	}
-	return rows
+	return rows, nil
 }

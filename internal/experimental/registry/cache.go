@@ -20,11 +20,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
-	"io/ioutil"
-	"os"
-	"path/filepath"
-
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/errdefs"
 	orascontent "github.com/deislabs/oras/pkg/content"
@@ -32,10 +27,14 @@ import (
 	"github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
-
 	"helm.sh/helm/pkg/chart"
 	"helm.sh/helm/pkg/chart/loader"
 	"helm.sh/helm/pkg/chartutil"
+	"io"
+	"io/ioutil"
+	"os"
+	"path/filepath"
+	"time"
 )
 
 const (
@@ -58,132 +57,197 @@ type (
 		ociStore    *orascontent.OCIStore
 		memoryStore *orascontent.Memorystore
 	}
+
+	// CacheRefSummary contains as much info as available describing a chart reference in cache
+	// Note: fields sorted by order they are set in FetchReference
+	CacheRefSummary struct {
+		Name         string
+		Repo         string
+		Tag          string
+		Exists       bool
+		Manifest     *ocispec.Manifest
+		Config       *ocispec.Descriptor
+		ContentLayer *ocispec.Descriptor
+		Size         int64
+		Digest       digest.Digest
+		CreatedAt    time.Time
+		Chart        *chart.Chart
+		ChartName    string
+		ChartVersion string
+	}
 )
 
 // NewCache returns a new OCI Layout-compliant cache with config
 func NewCache(options *CacheOptions) (*Cache, error) {
-	ociStore, err := orascontent.NewOCIStore(options.RootDir)
-	if err != nil {
-		return nil, err
-	}
 	cache := Cache{
-		debug:       options.Debug,
-		out:         options.Out,
-		rootDir:     options.RootDir,
-		ociStore:    ociStore,
-		memoryStore: orascontent.NewMemoryStore(),
+		debug:   options.Debug,
+		out:     options.Out,
+		rootDir: options.RootDir,
 	}
 	return &cache, nil
 }
 
-// storeChartAtRef saves a chart in cache under ref
-func (cache *Cache) storeChartAtRef(ch *chart.Chart, ref string) (*ocispec.Descriptor, bool, error) {
-	config, _, err := cache.saveChartConfig(ch)
-	if err != nil {
-		return nil, false, err
-	}
-	contentLayer, _, err := cache.saveChartContentLayer(ch)
-	if err != nil {
-		return nil, false, err
-	}
-	// TODO: better check for chart existence
-	manifest, manifestExists, err := cache.saveChartManifest(config, contentLayer)
-	if err != nil {
-		return nil, manifestExists, err
-	}
-	cache.ociStore.AddReference(ref, *manifest)
-	err = cache.ociStore.SaveIndex()
-	return contentLayer, manifestExists, err
-}
-
-// fetchChartByRef returns a chart based on ref
-func (cache *Cache) fetchChartByRef(ref string) (*chart.Chart, bool, error) {
-	for _, m := range cache.ociStore.ListReferences() {
-		if m.Annotations[ocispec.AnnotationRefName] == ref {
-			cb, err := cache.manifestDescriptorToChartContentBytes(&m)
-			if err != nil {
-				return nil, false, err
-			}
-			ch, err := loader.LoadArchive(bytes.NewBuffer(cb))
-			if err != nil {
-				return nil, false, err
-			}
-			return ch, true, nil
+// Init creates files needed necessary for OCI layout store
+func (cache *Cache) Init() error {
+	if cache.ociStore == nil {
+		ociStore, err := orascontent.NewOCIStore(cache.rootDir)
+		if err != nil {
+			return err
 		}
+		cache.ociStore = ociStore
+		cache.memoryStore = orascontent.NewMemoryStore()
 	}
-	return nil, false, nil
+	return nil
 }
 
-// removeChartByRef removes a chart from cache based on ref
-// TODO: garbage collection, only manifest removed
-func (cache *Cache) removeChartByRef(ref string) (bool, error) {
-	_, exists, err := cache.fetchChartByRef(ref)
-	if err != nil || !exists {
-		return exists, err
+// FetchReference retrieves a ref from cache
+func (cache *Cache) FetchReference(ref *Reference) (*CacheRefSummary, error) {
+	if err := cache.Init(); err != nil {
+		return nil, err
 	}
-	cache.ociStore.DeleteReference(ref)
-	err = cache.ociStore.SaveIndex()
-	return exists, err
-}
-
-// loadChartDescriptorsByRef returns config and layers represneting a chart, and loads them into memory store
-func (cache *Cache) loadChartDescriptorsByRef(ref string) (*ocispec.Descriptor, []ocispec.Descriptor, bool, error) {
-	for _, m := range cache.ociStore.ListReferences() {
-		if m.Annotations[ocispec.AnnotationRefName] == ref {
-			contentBytes, err := cache.manifestDescriptorToChartContentBytes(&m)
-			contentLayer := cache.memoryStore.Add("", HelmChartContentLayerMediaType, contentBytes)
+	r := CacheRefSummary{
+		Name: ref.FullName(),
+		Repo: ref.Repo,
+		Tag:  ref.Tag,
+	}
+	for _, desc := range cache.ociStore.ListReferences() {
+		if desc.Annotations[ocispec.AnnotationRefName] == r.Name {
+			r.Exists = true
+			manifestBytes, err := cache.fetchBlob(&desc)
+			if err != nil {
+				return &r, err
+			}
+			var manifest ocispec.Manifest
+			err = json.Unmarshal(manifestBytes, &manifest)
+			if err != nil {
+				return &r, err
+			}
+			r.Manifest = &manifest
+			r.Config = &manifest.Config
+			numLayers := len(manifest.Layers)
+			if numLayers != 1 {
+				return &r, errors.New(
+					fmt.Sprintf("manifest does not contain exactly 1 layer (total: %d)", numLayers))
+			}
+			var contentLayer *ocispec.Descriptor
+			for _, layer := range manifest.Layers {
+				switch layer.MediaType {
+				case HelmChartContentLayerMediaType:
+					contentLayer = &layer
+				}
+			}
+			if contentLayer.Size == 0 {
+				return &r, errors.New(
+					fmt.Sprintf("manifest does not contain a layer with mediatype %s", HelmChartContentLayerMediaType))
+			}
+			r.ContentLayer = contentLayer
+			info, err := cache.ociStore.Info(ctx(cache.out, cache.debug), contentLayer.Digest)
+			if err != nil {
+				return &r, err
+			}
+			r.Size = info.Size
+			r.Digest = info.Digest
+			r.CreatedAt = info.CreatedAt
+			contentBytes, err := cache.fetchBlob(contentLayer)
+			if err != nil {
+				return &r, err
+			}
 			ch, err := loader.LoadArchive(bytes.NewBuffer(contentBytes))
 			if err != nil {
-				return nil, nil, false, err
+				return &r, err
 			}
-			configBytes, err := json.Marshal(ch.Metadata)
-			if err != nil {
-				return nil, nil, false, err
-			}
-			config := cache.memoryStore.Add("", HelmChartConfigMediaType, configBytes)
-			return &config, []ocispec.Descriptor{contentLayer}, true, nil
+			r.Chart = ch
+			r.ChartName = ch.Metadata.Name
+			r.ChartVersion = ch.Metadata.Version
 		}
 	}
-	return nil, nil, false, nil
+	return &r, nil
 }
 
-// manifestDescriptorToChart converts a manifest to a chart
-func (cache *Cache) manifestDescriptorToChart(desc *ocispec.Descriptor) (*chart.Chart, error) {
-	contentBytes, err := cache.manifestDescriptorToChartContentBytes(desc)
-	if err != nil {
+// DeleteRef deletes a ref from cache
+func (cache *Cache) StoreReference(ref *Reference, ch *chart.Chart) (*CacheRefSummary, error) {
+	if err := cache.Init(); err != nil {
 		return nil, err
 	}
-	return loader.LoadArchive(bytes.NewBuffer(contentBytes))
+	r := CacheRefSummary{
+		Name:  ref.FullName(),
+		Repo:  ref.Repo,
+		Tag:   ref.Tag,
+		Chart: ch,
+	}
+	existing, _ := cache.FetchReference(ref)
+	r.Exists = existing.Exists
+	config, _, err := cache.saveChartConfig(ch)
+	if err != nil {
+		return &r, err
+	}
+	r.Config = config
+	contentLayer, _, err := cache.saveChartContentLayer(ch)
+	if err != nil {
+		return &r, err
+	}
+	r.ContentLayer = contentLayer
+	info, err := cache.ociStore.Info(ctx(cache.out, cache.debug), contentLayer.Digest)
+	if err != nil {
+		return &r, err
+	}
+	r.Size = info.Size
+	r.Digest = info.Digest
+	r.CreatedAt = info.CreatedAt
+	manifest, manifestDesc, _, err := cache.saveChartManifest(config, contentLayer)
+	if err != nil {
+		return &r, err
+	}
+	r.Manifest = manifest
+	cache.ociStore.AddReference(r.Name, *manifestDesc)
+	err = cache.ociStore.SaveIndex()
+	return &r, err
 }
 
-// manifestDescriptorToChartContentBytes converts a manifest to the content bytes of a chart
-func (cache *Cache) manifestDescriptorToChartContentBytes(desc *ocispec.Descriptor) ([]byte, error) {
-	manifestBytes, err := cache.fetchBlob(desc)
-	if err != nil {
+// DeleteRef deletes a ref from cache
+// TODO: garbage collection, only manifest removed
+func (cache *Cache) DeleteReference(ref *Reference) (*CacheRefSummary, error) {
+	if err := cache.Init(); err != nil {
 		return nil, err
 	}
-	var manifest ocispec.Manifest
-	err = json.Unmarshal(manifestBytes, &manifest)
+	r, err := cache.FetchReference(ref)
+	if err != nil || !r.Exists {
+		return r, err
+	}
+	cache.ociStore.DeleteReference(r.Name)
+	err = cache.ociStore.SaveIndex()
 	if err != nil {
-		return nil, err
+		return r, err
 	}
-	numLayers := len(manifest.Layers)
-	if numLayers != 1 {
-		return nil, errors.New(
-			fmt.Sprintf("manifest does not contain exactly 1 layer (total: %d)", numLayers))
+
+	return r, err
+}
+
+// DeleteRef deletes a ref from cache
+func (cache *Cache) ListReferences() ([]*CacheRefSummary, error) {
+	var rr []*CacheRefSummary
+	if err := cache.Init(); err != nil {
+		return rr, err
 	}
-	var contentLayer *ocispec.Descriptor
-	for _, layer := range manifest.Layers {
-		switch layer.MediaType {
-		case HelmChartContentLayerMediaType:
-			contentLayer = &layer
+	for _, desc := range cache.ociStore.ListReferences() {
+		name := desc.Annotations[ocispec.AnnotationRefName]
+		if name == "" {
+			if cache.debug {
+				fmt.Fprintf(cache.out, "warning: found manifest without name: %s", desc.Digest.Hex())
+			}
+			continue
 		}
+		ref, err := ParseReference(name)
+		if err != nil {
+			return rr, err
+		}
+		r, err := cache.FetchReference(ref)
+		if err != nil {
+			return rr, err
+		}
+		rr = append(rr, r)
 	}
-	if contentLayer.Size == 0 {
-		return nil, errors.New(
-			fmt.Sprintf("manifest does not contain a layer with mediatype %s", HelmChartContentLayerMediaType))
-	}
-	return cache.fetchBlob(contentLayer)
+	return rr, nil
 }
 
 // saveChartConfig stores the Chart.yaml as json blob and return descriptor
@@ -222,7 +286,7 @@ func (cache *Cache) saveChartContentLayer(ch *chart.Chart) (*ocispec.Descriptor,
 }
 
 // saveChartManifest stores the chart manifest as json blob and return descriptor
-func (cache *Cache) saveChartManifest(config *ocispec.Descriptor, contentLayer *ocispec.Descriptor) (*ocispec.Descriptor, bool, error) {
+func (cache *Cache) saveChartManifest(config *ocispec.Descriptor, contentLayer *ocispec.Descriptor) (*ocispec.Manifest, *ocispec.Descriptor, bool, error) {
 	manifest := ocispec.Manifest{
 		Versioned: specs.Versioned{SchemaVersion: 2},
 		Config:    *config,
@@ -230,18 +294,18 @@ func (cache *Cache) saveChartManifest(config *ocispec.Descriptor, contentLayer *
 	}
 	manifestBytes, err := json.Marshal(manifest)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 	manifestExists, err := cache.storeBlob(manifestBytes)
 	if err != nil {
-		return nil, manifestExists, err
+		return nil, nil, manifestExists, err
 	}
 	descriptor := ocispec.Descriptor{
 		MediaType: ocispec.MediaTypeImageManifest,
 		Digest:    digest.FromBytes(manifestBytes),
 		Size:      int64(len(manifestBytes)),
 	}
-	return &descriptor, manifestExists, nil
+	return &manifest, &descriptor, manifestExists, nil
 }
 
 // storeBlob stores a blob on filesystem
