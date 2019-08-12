@@ -177,13 +177,21 @@ func (c *Client) PullChart(ref *Reference) error {
 		return err
 	}
 	fmt.Fprintf(c.out, "%s: Pulling from %s\n", ref.Tag, ref.Repo)
-	manifest, _, err := oras.Pull(ctx(c.out, c.debug), c.resolver, ref.FullName(), c.cache.ociStore,
+	manifest, layers, err := oras.Pull(ctx(c.out, c.debug), c.resolver, ref.FullName(), c.cache.ociStore,
 		oras.WithPullEmptyNameAllowed(),
 		oras.WithAllowedMediaTypes(KnownMediaTypes()),
 		oras.WithContentProvideIngester(c.cache.ociStore))
 	if err != nil {
 		return err
 	}
+	ch, exists, err := c.cache.fetchChartByRef(ref.FullName())
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return errors.New(fmt.Sprintf("Chart not found: %s", ref.FullName()))
+	}
+	c.printChartSummary(ref, &layers[0], ch)
 	c.cache.ociStore.AddReference(ref.FullName(), manifest)
 	err = c.cache.ociStore.SaveIndex()
 	if !exists {
