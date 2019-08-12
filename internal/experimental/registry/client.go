@@ -169,6 +169,13 @@ func (c *Client) PushChart(ref *Reference) error {
 
 // PullChart downloads a chart from a registry
 func (c *Client) PullChart(ref *Reference) error {
+	if ref.Tag == "" {
+		return errors.New("tag explicitly required")
+	}
+	_, exists, err := c.cache.fetchChartByRef(ref.FullName())
+	if err != nil {
+		return err
+	}
 	fmt.Fprintf(c.out, "%s: Pulling from %s\n", ref.Tag, ref.Repo)
 	manifest, _, err := oras.Pull(ctx(c.out, c.debug), c.resolver, ref.FullName(), c.cache.ociStore,
 		oras.WithPullEmptyNameAllowed(),
@@ -179,6 +186,11 @@ func (c *Client) PullChart(ref *Reference) error {
 	}
 	c.cache.ociStore.AddReference(ref.FullName(), manifest)
 	err = c.cache.ociStore.SaveIndex()
+	if !exists {
+		fmt.Fprintf(c.out, "Status: Downloaded newer chart for %s\n", ref.FullName())
+	} else {
+		fmt.Fprintf(c.out, "Status: Chart is up to date for %s\n", ref.FullName())
+	}
 	return err
 }
 
