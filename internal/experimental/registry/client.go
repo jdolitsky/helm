@@ -166,14 +166,11 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(c.out, "%s: saved\n", ref.Tag)
-	if c.debug {
-		fmt.Fprintf(c.out, "+ ref: %s\n", ref.FullName())
-		fmt.Fprintf(c.out, "+ digest: %s\n", content.Digest.Hex())
-		fmt.Fprintf(c.out, "+ size: %s\n", byteCountBinary(content.Size))
-		fmt.Fprintf(c.out, "+ name: %s\n", ch.Metadata.Name)
-		fmt.Fprintf(c.out, "+ version: %s\n", ch.Metadata.Version)
-	}
+	fmt.Fprintf(c.out, "ref:     %s\n", ref.FullName())
+	fmt.Fprintf(c.out, "digest:  %s\n", content.Digest.Hex())
+	fmt.Fprintf(c.out, "size:    %s\n", byteCountBinary(content.Size))
+	fmt.Fprintf(c.out, "name:    %s\n", ch.Metadata.Name)
+	fmt.Fprintf(c.out, "version: %s\n", ch.Metadata.Version)
 	return nil
 }
 
