@@ -69,8 +69,15 @@ func (suite *RegistryClientTestSuite) SetupSuite() {
 	resolver, err := client.Resolver(context.Background())
 	suite.Nil(err, "no error creating resolver")
 
+	// create cache
+	cache, err := NewCache(&CacheOptions{
+		Debug:   true,
+		Out:     suite.Out,
+		RootDir: filepath.Join(suite.CacheRootDir, CacheRootDir),
+	})
+
 	// Init test client
-	suite.RegistryClient = NewClient(&ClientOptions{
+	suite.RegistryClient, err = NewClient(&ClientOptions{
 		Out: suite.Out,
 		Authorizer: Authorizer{
 			Client: client,
@@ -78,8 +85,9 @@ func (suite *RegistryClientTestSuite) SetupSuite() {
 		Resolver: Resolver{
 			Resolver: resolver,
 		},
-		CacheRootDir: suite.CacheRootDir,
+		Cache: *cache,
 	})
+	suite.Nil(err, "no error creating registry client")
 
 	// create htpasswd file (w BCrypt, which is required)
 	pwBytes, err := bcrypt.GenerateFromPassword([]byte(testPassword), bcrypt.DefaultCost)

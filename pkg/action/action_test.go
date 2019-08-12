@@ -19,6 +19,7 @@ import (
 	"context"
 	"flag"
 	"io/ioutil"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -53,21 +54,32 @@ func actionConfigFixture(t *testing.T) *Configuration {
 	if err != nil {
 		t.Fatal(err)
 	}
+	
+	cache, err := registry.NewCache(&registry.CacheOptions{
+		Debug:   true,
+		Out:     ioutil.Discard,
+		RootDir: filepath.Join(tdir, registry.CacheRootDir),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	registryClient, err := registry.NewClient(&registry.ClientOptions{
+		Out: ioutil.Discard,
+		Authorizer: registry.Authorizer{
+			Client: client,
+		},
+		Resolver: registry.Resolver{
+			Resolver: resolver,
+		},
+		Cache: *cache,
+	})
 
 	return &Configuration{
-		Releases:     storage.Init(driver.NewMemory()),
-		KubeClient:   &kubefake.FailingKubeClient{PrintingKubeClient: kubefake.PrintingKubeClient{Out: ioutil.Discard}},
-		Capabilities: chartutil.DefaultCapabilities,
-		RegistryClient: registry.NewClient(&registry.ClientOptions{
-			Out: ioutil.Discard,
-			Authorizer: registry.Authorizer{
-				Client: client,
-			},
-			Resolver: registry.Resolver{
-				Resolver: resolver,
-			},
-			CacheRootDir: tdir,
-		}),
+		Releases:       storage.Init(driver.NewMemory()),
+		KubeClient:     &kubefake.FailingKubeClient{PrintingKubeClient: kubefake.PrintingKubeClient{Out: ioutil.Discard}},
+		Capabilities:   chartutil.DefaultCapabilities,
+		RegistryClient: registryClient,
 		Log: func(format string, v ...interface{}) {
 			t.Helper()
 			if *verbose {

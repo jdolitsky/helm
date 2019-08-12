@@ -179,9 +179,12 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 
 // LoadChart retrieves a chart object by reference
 func (c *Client) LoadChart(ref *Reference) (*chart.Chart, error) {
-	ch, _, err := c.cache.fetchChartByRef(ref.FullName())
+	ch, exists, err := c.cache.fetchChartByRef(ref.FullName())
 	if err != nil {
 		return nil, err
+	}
+	if !exists {
+		return nil, errors.New(fmt.Sprintf("Chart not found: %s", ref.FullName()))
 	}
 	return ch, nil
 }
@@ -189,11 +192,14 @@ func (c *Client) LoadChart(ref *Reference) (*chart.Chart, error) {
 // RemoveChart deletes a locally saved chart
 func (c *Client) RemoveChart(ref *Reference) error {
 	exists, err := c.cache.removeChartByRef(ref.FullName())
+	if err != nil {
+		return err
+	}
 	if !exists {
-		return errors.New(fmt.Sprintf("No such chart: %s", ref.FullName()))
+		return errors.New(fmt.Sprintf("Chart not found: %s", ref.FullName()))
 	}
 	fmt.Fprintf(c.out, "%s: removed\n", ref.Tag)
-	return err
+	return nil
 }
 
 // PrintChartTable prints a list of locally stored charts
