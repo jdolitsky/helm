@@ -143,7 +143,7 @@ func (c *Client) PushChart(ref *Reference) error {
 	fmt.Fprintf(c.out, "The push refers to repository [%s]\n", r.Repo)
 	c.printCacheRefSummary(r)
 	layers := []ocispec.Descriptor{*r.ContentLayer}
-	_, err = oras.Push(ctx(c.out, c.debug), c.resolver, r.Name, c.cache.memoryStore, layers,
+	_, err = oras.Push(ctx(c.out, c.debug), c.resolver, r.Name, c.cache.ociStore, layers,
 		oras.WithConfig(*r.Config), oras.WithNameValidation(nil))
 	if err != nil {
 		return err
@@ -181,6 +181,9 @@ func (c *Client) PullChart(ref *Reference) error {
 		return err
 	}
 	r, err := c.cache.FetchReference(ref)
+	if err != nil {
+		return err
+	}
 	if !r.Exists {
 		return errors.New(fmt.Sprintf("Chart not found: %s", r.Name))
 	}
