@@ -133,16 +133,38 @@ func (c *Client) Logout(hostname string) error {
 
 // PushChart uploads a chart to a registry
 func (c *Client) PushChart(ref *Reference) error {
+	ch, exists, err := c.cache.fetchChartByRef(ref.FullName())
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return errors.New(fmt.Sprintf("Chart not found: %s", ref.FullName()))
+	}
 	config, layers, exists, err := c.cache.loadChartDescriptorsByRef(ref.FullName())
 	if err != nil {
 		return err
 	}
 	if !exists {
-		return errors.New(fmt.Sprintf("No such chart: %s", ref.FullName()))
+		return errors.New(fmt.Sprintf("Chart not found: %s", ref.FullName()))
 	}
+	fmt.Fprintf(c.out, "The push refers to repository [%s]\n", ref.Repo)
+	c.printChartSummary(ref, &layers[0], ch)
 	_, err = oras.Push(ctx(c.out, c.debug), c.resolver, ref.FullName(), c.cache.memoryStore,
 		layers, oras.WithConfig(*config), oras.WithNameValidation(nil))
-	return err
+	if err != nil {
+		return err
+	}
+	var totalSize int64
+	for _, layer := range layers {
+		totalSize += layer.Size
+	}
+	s := ""
+	if 1 < len(layers) {
+		s = "s"
+	}
+	fmt.Fprintf(c.out,
+		"%s: pushed to remote (%d layer%s, %s total)\n", ref.Tag, len(layers), s, byteCountBinary(totalSize))
+	return nil
 }
 
 // PullChart downloads a chart from a registry
@@ -166,11 +188,8 @@ func (c *Client) SaveChart(ch *chart.Chart, ref *Reference) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(c.out, "ref:     %s\n", ref.FullName())
-	fmt.Fprintf(c.out, "digest:  %s\n", content.Digest.Hex())
-	fmt.Fprintf(c.out, "size:    %s\n", byteCountBinary(content.Size))
-	fmt.Fprintf(c.out, "name:    %s\n", ch.Metadata.Name)
-	fmt.Fprintf(c.out, "version: %s\n", ch.Metadata.Version)
+	c.printChartSummary(ref, content, ch)
+	fmt.Fprintf(c.out, "%s: saved\n", ref.Tag)
 	return nil
 }
 
@@ -183,6 +202,14 @@ func (c *Client) LoadChart(ref *Reference) (*chart.Chart, error) {
 	if !exists {
 		return nil, errors.New(fmt.Sprintf("Chart not found: %s", ref.FullName()))
 	}
+	_, layers, exists, err := c.cache.loadChartDescriptorsByRef(ref.FullName())
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, errors.New(fmt.Sprintf("Chart not found: %s", ref.FullName()))
+	}
+	c.printChartSummary(ref, &layers[0], ch)
 	return ch, nil
 }
 
@@ -210,6 +237,14 @@ func (c *Client) PrintChartTable() error {
 	}
 	fmt.Fprintln(c.out, table.String())
 	return nil
+}
+
+func (c *Client) printChartSummary(ref *Reference, content *ocispec.Descriptor, ch *chart.Chart) {
+	fmt.Fprintf(c.out, "ref:     %s\n", ref.FullName())
+	fmt.Fprintf(c.out, "digest:  %s\n", content.Digest.Hex())
+	fmt.Fprintf(c.out, "size:    %s\n", byteCountBinary(content.Size))
+	fmt.Fprintf(c.out, "name:    %s\n", ch.Metadata.Name)
+	fmt.Fprintf(c.out, "version: %s\n", ch.Metadata.Version)
 }
 
 // getChartTableRows returns rows in uitable-friendly format
@@ -249,15 +284,6 @@ func (c *Client) getChartTableRows() [][]interface{} {
 			if c.debug {
 				fmt.Fprintf(c.out,
 					fmt.Sprintf("warning: chart descriptors could not be located for %s\n", ref))
-			}
-			continue
-		}
-		numLayers := len(layers)
-		if numLayers < 1 {
-			if c.debug {
-				fmt.Fprintf(c.out,
-					fmt.Sprintf("warning: chart descriptors had invalid layers (%d vs. 1) for %s: %s\n",
-						numLayers, ref, err.Error()))
 			}
 			continue
 		}
