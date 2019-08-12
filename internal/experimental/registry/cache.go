@@ -59,7 +59,7 @@ type (
 	}
 
 	// CacheRefSummary contains as much info as available describing a chart reference in cache
-	// Note: fields sorted by order they are set in FetchReference
+	// Note: fields here are sorted by the order in which they are set in FetchReference method
 	CacheRefSummary struct {
 		Name         string
 		Repo         string
