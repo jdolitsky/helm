@@ -165,7 +165,6 @@ func newRootCmd(actionConfig *action.Configuration, out io.Writer, args []string
 	// Add *Experimental* subcommands
 	registryClient, err := registry.NewClientWithDefaults()
 	if err != nil {
-		// TODO: do not panic
 		panic(err)
 	}
 	registryClient.SetDebug(settings.Debug)
